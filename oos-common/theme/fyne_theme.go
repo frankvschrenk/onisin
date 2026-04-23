@@ -77,6 +77,33 @@ func (t *GlobalFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) c
 		if w := t.widget(KindLabel); w != nil && w.Foreground != "" {
 			return pick(w.Foreground)
 		}
+	case fyneTheme.ColorNamePlaceHolder:
+		// Form-field labels ("ID", "Vorname", ...) use PlaceHolder.
+		// Fyne's default puts it at 50% grey which reads as barely
+		// visible against our warm paper. Use the "soft" ink tone
+		// from the toolbar widget — dim enough to be secondary, loud
+		// enough to be legible.
+		if w := t.widget(KindToolbar); w != nil && w.Foreground != "" {
+			return pick(w.Foreground)
+		}
+	case fyneTheme.ColorNameDisabled:
+		// Disabled widgets use the rule colour so they visibly
+		// recede but don't vanish entirely.
+		if w := t.widget(KindCard); w != nil && w.Border != "" {
+			return pick(w.Border)
+		}
+	case fyneTheme.ColorNameDisabledButton:
+		if w := t.widget(KindSection); w != nil && w.Background != "" {
+			return pick(w.Background)
+		}
+	case fyneTheme.ColorNameScrollBar:
+		if w := t.widget(KindCard); w != nil && w.Border != "" {
+			return pick(w.Border)
+		}
+	case fyneTheme.ColorNameShadow:
+		// A soft cool-grey shadow that sits over any paper or slate
+		// without screaming. Fixed alpha, no theme attribute.
+		return color.NRGBA{R: 0, G: 0, B: 0, A: 0x18}
 	case fyneTheme.ColorNamePrimary,
 		fyneTheme.ColorNameFocus:
 		if w := t.widget(KindButton); w != nil && w.Primary != "" {
@@ -192,6 +219,13 @@ func NewWidgetFyneTheme(wt *WidgetTheme, variant string) fyne.Theme {
 	}
 }
 
+// Color resolves a Fyne colour slot against the widget's theme.
+//
+// The mapping is scoped to the widget's role so a Form theme does
+// not leak its background into the Input slots of the entries that
+// happen to live inside it. Each widget kind declares which Fyne
+// slots it owns; everything else falls through to the active global
+// theme (which in turn falls through to Fyne's default).
 func (t *WidgetFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color {
 	bg := ParseHex(t.wt.Background)
 	fg := ParseHex(t.wt.Foreground)
@@ -199,19 +233,42 @@ func (t *WidgetFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) c
 	border := ParseHex(t.wt.Border)
 	header := ParseHex(t.wt.Header)
 
+	// ownsBg returns true when this widget kind owns the given
+	// background-family slot. Prevents e.g. KindForm from
+	// overriding ColorNameInputBackground with its shell colour,
+	// which would drown the entries that sit on top of it.
+	ownsBg := func(slot fyne.ThemeColorName) bool {
+		switch t.wt.Kind {
+		case KindEntry, KindTextArea:
+			return slot == fyneTheme.ColorNameInputBackground
+		case KindButton:
+			return slot == fyneTheme.ColorNameButton
+		case KindChoices:
+			return slot == fyneTheme.ColorNameMenuBackground ||
+				slot == fyneTheme.ColorNameInputBackground
+		case KindTable:
+			return slot == fyneTheme.ColorNameHeaderBackground ||
+				slot == fyneTheme.ColorNameBackground
+		case KindCard, KindList, KindSection, KindForm, KindToolbar:
+			return slot == fyneTheme.ColorNameBackground
+		}
+		return false
+	}
+
 	switch name {
-	// Background → trifft je nach Widget-Typ verschiedene Color-Namen
 	case fyneTheme.ColorNameBackground,
-		fyneTheme.ColorNameButton,          // Button-Hintergrund
-		fyneTheme.ColorNameInputBackground, // Entry/TextArea-Hintergrund
-		fyneTheme.ColorNameMenuBackground,  // Choices/Select-Hintergrund
-		fyneTheme.ColorNameHeaderBackground: // Table-Header
-		if bg != color.Transparent {
+		fyneTheme.ColorNameButton,
+		fyneTheme.ColorNameInputBackground,
+		fyneTheme.ColorNameMenuBackground:
+		if ownsBg(name) && bg != color.Transparent {
 			return bg
 		}
-		// Header hat eigenen Wert
-		if name == fyneTheme.ColorNameHeaderBackground && header != color.Transparent {
+	case fyneTheme.ColorNameHeaderBackground:
+		if t.wt.Kind == KindTable && header != color.Transparent {
 			return header
+		}
+		if t.wt.Kind == KindTable && bg != color.Transparent {
+			return bg
 		}
 	case fyneTheme.ColorNameForeground,
 		fyneTheme.ColorNamePlaceHolder:
