@@ -78,10 +78,21 @@ func (t *GlobalFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) c
 			return pick(w.Foreground)
 		}
 	case fyneTheme.ColorNamePrimary,
-		fyneTheme.ColorNameFocus,
-		fyneTheme.ColorNameSelection:
+		fyneTheme.ColorNameFocus:
 		if w := t.widget(KindButton); w != nil && w.Primary != "" {
 			return pick(w.Primary)
+		}
+	case fyneTheme.ColorNameSelection:
+		// Selection is rendered as a filled rectangle under the row/cell.
+		// The full-opacity brand colour drowns the text; Fyne's default
+		// uses ~30% alpha of the primary, we match that convention so
+		// the ink foreground still reads through.
+		if w := t.widget(KindButton); w != nil && w.Primary != "" {
+			c := ParseHex(w.Primary)
+			if nrgba, ok := c.(color.NRGBA); ok {
+				nrgba.A = 0x4d // 30%
+				return nrgba
+			}
 		}
 	case fyneTheme.ColorNameOverlayBackground,
 		fyneTheme.ColorNameMenuBackground:
