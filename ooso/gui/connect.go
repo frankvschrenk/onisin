@@ -105,7 +105,16 @@ func buildConnectBar(conn *Connection) fyne.CanvasObject {
 	return container.NewVBox(dsnRow, errorLabel)
 }
 
-// resolveDefaultDSN liest die DSN aus Umgebungsvariablen.
+// defaultDemoDSN is the DSN that matches the local demo setup from
+// demo.toml (superuser "postgres", password "demo", database "onisin").
+// Pre-filling this saves the usual first click; operators running
+// against a real database override it via OOSO_DSN or by typing.
+const defaultDemoDSN = "postgres://postgres:demo@localhost:5432/onisin?sslmode=disable"
+
+// resolveDefaultDSN returns the DSN to pre-fill the connection bar
+// with. Environment variables take precedence over the built-in demo
+// default so the importer can be pointed at a different database
+// without touching the UI.
 func resolveDefaultDSN() string {
 	if v := os.Getenv("OOSO_DSN"); v != "" {
 		return v
@@ -113,5 +122,5 @@ func resolveDefaultDSN() string {
 	if v := os.Getenv("OOSP_CTX_DSN"); v != "" {
 		return v
 	}
-	return ""
+	return defaultDemoDSN
 }

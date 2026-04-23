@@ -83,6 +83,8 @@ func LoadAppDirsConfig() error {
 		LLMSchemaStrategy = v
 	}
 
+	applyThemeVariantFromViper()
+
 	log.Printf("[config] loaded: %s", path)
 	log.Printf("[config] OOSP: %s  LLM: %s  chat-model: %s  api-key: %s",
 		Meta.OOSPUrl, LLMUrl, LLMChatModel, maskKey(LLMApiKey))

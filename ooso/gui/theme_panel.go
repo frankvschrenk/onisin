@@ -28,7 +28,11 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-const themeCTXID = "oos.theme"
+// themeCTXID is the oos.ctx row the desktop client reads the active
+// theme from (via oosp's /theme endpoint). Must match the id used by
+// oos-demo's seed and by oosp.GetTheme() — all three point at the
+// same row.
+const themeCTXID = "theme"
 
 // buildThemePanel baut den Theme-Editor und gibt ihn zusammen mit
 // einer openPreview-Funktion zurück.
@@ -37,7 +41,7 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 	getWindow := func() fyne.Window {
 		return fyne.CurrentApp().Driver().AllWindows()[0]
 	}
-	xtheme := oostheme.DefaultTheme()
+	xtheme := oostheme.DefaultTheme("light")
 
 	// ── Preview-Fenster ───────────────────────────────────────────────────
 	var previewWin fyne.Window
@@ -324,7 +328,7 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 		widget.NewToolbarSeparator(),
 		// Reset
 		widget.NewToolbarAction(theme.ContentClearIcon(), func() {
-			xtheme = oostheme.DefaultTheme()
+			xtheme = oostheme.DefaultTheme("light")
 			buildEditor(xtheme.ForWidget(kinds[0]))
 			widgetList.Select(0)
 			variantRadio.SetSelected("light")

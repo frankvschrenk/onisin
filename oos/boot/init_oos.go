@@ -45,29 +45,58 @@ func initOOS() {
 	loadAndApplyTheme()
 }
 
-// loadAndApplyTheme fetches the active theme from OOSP and applies it to Fyne.
-// If no theme is configured, the default Fyne theme remains active.
+// loadAndApplyTheme fetches the active theme from oosp and applies it.
+//
+// Resolution order:
+//  1. oos.ctx[theme] as served by oosp — operator-authored theme wins.
+//  2. Built-in DefaultTheme for the preferred variant from helper.
+//     This keeps the desktop client visually aligned with onisin.com
+//     even when the database has no theme row yet.
+//
+// The user's variant preference (light/dark) is read from helper —
+// see helper.PreferredThemeVariant. A runtime switch calls back into
+// ApplyTheme below.
 func loadAndApplyTheme() {
-	if helper.OOSP == nil {
-		return
+	variant := helper.PreferredThemeVariant()
+
+	var t *oostheme.OOSTheme
+
+	if helper.OOSP != nil {
+		xml, err := helper.OOSP.Call("oosp_load_theme", nil)
+		switch {
+		case err != nil:
+			log.Printf("[boot] theme load: %v — using default", err)
+		case xml == "":
+			log.Printf("[boot] no theme in oos.ctx — using default")
+		default:
+			parsed, perr := oostheme.ParseXML(xml)
+			if perr != nil {
+				log.Printf("[boot] theme parse: %v — using default", perr)
+			} else {
+				t = parsed
+				// Respect the user's variant preference even when the
+				// stored theme declares the other one. Palettes in both
+				// variants share brand/accent colours, so the swap is
+				// visually consistent.
+				if t.Variant != variant {
+					log.Printf("[boot] theme variant override: %s -> %s", t.Variant, variant)
+					t.Variant = variant
+				}
+			}
+		}
 	}
 
-	xml, err := helper.OOSP.Call("oosp_load_theme", nil)
-	if err != nil {
-		log.Printf("[boot] theme load: %v", err)
-		return
-	}
-	if xml == "" {
-		log.Printf("[boot] no theme configured — using default theme")
-		return
+	if t == nil {
+		t = oostheme.DefaultTheme(variant)
 	}
 
-	t, err := oostheme.ParseXML(xml)
-	if err != nil {
-		log.Printf("[boot] theme parse: %v", err)
-		return
-	}
+	ApplyTheme(t)
+}
 
+// ApplyTheme sets t as the active Fyne theme and records it as the
+// current theme for subsequent DSL renders. Safe to call from any
+// goroutine; the Fyne interaction is marshalled onto the main thread.
+func ApplyTheme(t *oostheme.OOSTheme) {
 	helper.ActiveTheme = t
 
 	fyne.Do(func() {

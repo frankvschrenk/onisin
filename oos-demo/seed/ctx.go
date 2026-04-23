@@ -4,10 +4,23 @@ package seed
 
 import (
 	"database/sql"
+	"fmt"
+
+	oostheme "onisin.com/oos-common/theme"
 )
 
 // seedCTX writes all CTX definition files into oos.ctx.
 func seedCTX(db *sql.DB) error {
+	// Serialise the built-in default theme so the UI has a real theme
+	// to render from on first launch. Without this row the desktop
+	// client falls back to its compiled-in default, and the theme
+	// editor in ooso shows an empty skeleton — the two views then
+	// diverge visually until someone authors a theme by hand.
+	themeXML, err := oostheme.DefaultTheme("light").ToXML()
+	if err != nil {
+		return fmt.Errorf("serialise default theme: %w", err)
+	}
+
 	entries := []struct {
 		id  string
 		xml string
@@ -16,6 +29,7 @@ func seedCTX(db *sql.DB) error {
 		{"groups",      groupsXML},
 		{"person",      personCTXXML},
 		{"note",        noteCTXXML},
+		{"theme",       themeXML},
 	}
 
 	for _, e := range entries {

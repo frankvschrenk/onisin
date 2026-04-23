@@ -86,11 +86,122 @@ type OOSTheme struct {
 	Widgets []WidgetTheme
 }
 
-func DefaultTheme() *OOSTheme {
-	t := &OOSTheme{Variant: "dark"}
-	for _, k := range AllWidgetKinds {
-		t.Widgets = append(t.Widgets, WidgetTheme{Kind: k})
+// Palette constants — shared between the light and dark default themes
+// and mirrored in the onisin.com landing page so the desktop client,
+// the website and the documentation read as one product.
+//
+// The naming is deliberately neutral (brand / accent / ink / paper)
+// so a single source of truth can feed both themes; the variant picks
+// which shade of "paper" or "ink" a given widget renders against.
+const (
+	// Brand — deep indigo for primary actions, focus, selection.
+	paletteBrand     = "#1e3a8a"
+	paletteBrandSoft = "#3b5bdb"
+
+	// Accent — warm amber for highlights and call-outs.
+	paletteAccent     = "#d97706"
+	paletteAccentSoft = "#fef3c7"
+
+	// Ink — text colours, darkest to faintest.
+	paletteInk      = "#1f2937"
+	paletteInkSoft  = "#4b5563"
+	paletteInkFaint = "#6b7280"
+
+	// Paper — light variant backgrounds.
+	paperBg     = "#fafaf7"
+	paperSoft   = "#f3f1ea"
+	paperCard   = "#ffffff"
+	paperRule   = "#e5e1d6"
+	paperHeader = "#eceae1"
+
+	// Slate — dark variant backgrounds.
+	slateBg     = "#13151a"
+	slateSoft   = "#1a1d23"
+	slateCard   = "#1e2128"
+	slateRule   = "#2c3039"
+	slateHeader = "#252932"
+
+	// Inverted ink — readable on slate.
+	slateInk      = "#e5e7eb"
+	slateInkSoft  = "#cbd5e1"
+	slateInkFaint = "#94a3b8"
+)
+
+// DefaultTheme returns the built-in theme for the given variant
+// ("light" or "dark"). Any other value falls back to "light".
+//
+// The theme is fully populated — every WidgetKind gets colours,
+// radius and padding that match the onisin.com palette. This is the
+// theme shown on first launch when oos.theme is empty and the one
+// the desktop client falls back to if oosp cannot serve a theme.
+func DefaultTheme(variant string) *OOSTheme {
+	if variant == "dark" {
+		return defaultDarkTheme()
 	}
+	return defaultLightTheme()
+}
+
+// defaultLightTheme — warm paper background, indigo brand, amber accent.
+func defaultLightTheme() *OOSTheme {
+	radius := "8"
+	t := &OOSTheme{
+		Variant: "light",
+		Sizes: GlobalSizes{
+			Text:         "14",
+			Padding:      "6",
+			InnerPadding: "10",
+		},
+	}
+	add := func(w WidgetTheme) { t.Widgets = append(t.Widgets, w) }
+
+	add(WidgetTheme{Kind: KindButton, Background: paperCard, Foreground: paperCard, Primary: paletteBrand, Border: paletteBrand, Radius: radius})
+	add(WidgetTheme{Kind: KindEntry, Background: paperCard, Foreground: paletteInk, Border: paperRule, Primary: paletteBrand, Radius: radius})
+	add(WidgetTheme{Kind: KindTextArea, Background: paperCard, Foreground: paletteInk, Border: paperRule, Primary: paletteBrand, Radius: radius})
+	add(WidgetTheme{Kind: KindLabel, Foreground: paletteInk})
+	add(WidgetTheme{Kind: KindCard, Background: paperCard, Foreground: paletteInk, Border: paperRule, Radius: radius})
+	add(WidgetTheme{Kind: KindSection, Background: paperSoft, Foreground: paletteInkSoft, Border: paperRule})
+	add(WidgetTheme{Kind: KindForm, Background: paperBg, Foreground: paletteInk})
+	add(WidgetTheme{Kind: KindTable, Background: paperCard, Foreground: paletteInk, Header: paperHeader, Border: paperRule})
+	add(WidgetTheme{Kind: KindList, Background: paperCard, Foreground: paletteInk, Border: paperRule, Primary: paletteBrand})
+	add(WidgetTheme{Kind: KindToolbar, Background: paperSoft, Foreground: paletteInkSoft, Border: paperRule})
+	add(WidgetTheme{Kind: KindCheck, Foreground: paletteInk, Primary: paletteBrand})
+	add(WidgetTheme{Kind: KindRadio, Foreground: paletteInk, Primary: paletteBrand})
+	add(WidgetTheme{Kind: KindChoices, Background: paperCard, Foreground: paletteInk, Border: paperRule, Primary: paletteBrand, Radius: radius})
+	add(WidgetTheme{Kind: KindSlider, Foreground: paletteInkSoft, Primary: paletteBrand})
+	add(WidgetTheme{Kind: KindProgress, Foreground: paperRule, Primary: paletteAccent})
+
+	return t
+}
+
+// defaultDarkTheme — slate backgrounds, same indigo brand for continuity.
+func defaultDarkTheme() *OOSTheme {
+	radius := "8"
+	t := &OOSTheme{
+		Variant: "dark",
+		Sizes: GlobalSizes{
+			Text:         "14",
+			Padding:      "6",
+			InnerPadding: "10",
+		},
+	}
+	add := func(w WidgetTheme) { t.Widgets = append(t.Widgets, w) }
+
+	add(WidgetTheme{Kind: KindButton, Background: slateCard, Foreground: "#ffffff", Primary: paletteBrandSoft, Border: paletteBrandSoft, Radius: radius})
+	add(WidgetTheme{Kind: KindEntry, Background: slateCard, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft, Radius: radius})
+	add(WidgetTheme{Kind: KindTextArea, Background: slateCard, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft, Radius: radius})
+	add(WidgetTheme{Kind: KindLabel, Foreground: slateInk})
+	add(WidgetTheme{Kind: KindCard, Background: slateCard, Foreground: slateInk, Border: slateRule, Radius: radius})
+	add(WidgetTheme{Kind: KindSection, Background: slateSoft, Foreground: slateInkSoft, Border: slateRule})
+	add(WidgetTheme{Kind: KindForm, Background: slateBg, Foreground: slateInk})
+	add(WidgetTheme{Kind: KindTable, Background: slateCard, Foreground: slateInk, Header: slateHeader, Border: slateRule})
+	add(WidgetTheme{Kind: KindList, Background: slateCard, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft})
+	add(WidgetTheme{Kind: KindToolbar, Background: slateSoft, Foreground: slateInkSoft, Border: slateRule})
+	add(WidgetTheme{Kind: KindCheck, Foreground: slateInk, Primary: paletteBrandSoft})
+	add(WidgetTheme{Kind: KindRadio, Foreground: slateInk, Primary: paletteBrandSoft})
+	add(WidgetTheme{Kind: KindChoices, Background: slateCard, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft, Radius: radius})
+	add(WidgetTheme{Kind: KindSlider, Foreground: slateInkFaint, Primary: paletteBrandSoft})
+	add(WidgetTheme{Kind: KindProgress, Foreground: slateRule, Primary: paletteAccent})
+
 	return t
 }
 
