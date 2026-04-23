@@ -99,6 +99,21 @@ func (t *GlobalFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) c
 		if w := t.widget(KindCard); w != nil && w.Background != "" {
 			return pick(w.Background)
 		}
+	case fyneTheme.ColorNameInputBackground:
+		// Inputs need to visibly sit on top of the card they live in.
+		// Fall back to the entry widget's background, which is set
+		// one elevation step higher than the card surface.
+		if w := t.widget(KindEntry); w != nil && w.Background != "" {
+			return pick(w.Background)
+		}
+	case fyneTheme.ColorNameButton:
+		if w := t.widget(KindButton); w != nil && w.Background != "" {
+			return pick(w.Background)
+		}
+	case fyneTheme.ColorNameHeaderBackground:
+		if w := t.widget(KindTable); w != nil && w.Header != "" {
+			return pick(w.Header)
+		}
 	case fyneTheme.ColorNameSeparator,
 		fyneTheme.ColorNameInputBorder:
 		if w := t.widget(KindCard); w != nil && w.Border != "" {

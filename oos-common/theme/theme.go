@@ -116,24 +116,27 @@ const (
 
 	// Slate — dark variant backgrounds.
 	//
-	// Four visible layers with enough contrast between them that the
+	// Five visible layers with enough contrast between them that the
 	// shell, the cards and the surfaces on top of cards all read as
 	// distinct without the user squinting. Warmer than pure zinc so
 	// the look stays consistent with the warm paper of the light
 	// variant (same hue family, just inverted brightness).
 	//
-	//   bg      shell background, dialogs
-	//   soft    toolbars, sidebars, section headers
-	//   card    forms, tables, lists
-	//   elevated inputs sitting on top of a card (entries, chips)
-	//   header  table header band, slightly brighter than card
-	//   rule    dividers and input borders
-	slateBg       = "#1b1d22"
-	slateSoft     = "#22252b"
-	slateCard     = "#282c33"
-	slateElevated = "#30353d"
-	slateHeader   = "#323741"
-	slateRule     = "#3a3f4a"
+	//   bg       shell background, window body
+	//   soft     toolbars, sidebars, section headers
+	//   card     forms, tables, lists — clearly lighter than bg
+	//   elevated inputs on top of a card — clearly lighter than card
+	//   header   table header band
+	//   rule     dividers and input borders — clearly lighter still
+	//
+	// Luminance steps are 8–10 points apart so adjacent layers never
+	// blur into each other, even on dim laptop panels.
+	slateBg       = "#15171c"
+	slateSoft     = "#1f2229"
+	slateCard     = "#2a2f38"
+	slateElevated = "#363c47"
+	slateHeader   = "#3a4150"
+	slateRule     = "#485163"
 
 	// Inverted ink — readable on slate.
 	slateInk      = "#e5e7eb"
