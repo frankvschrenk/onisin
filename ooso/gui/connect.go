@@ -76,7 +76,7 @@ func (c *Connection) setStatus(ok bool, msg string) {
 // DSN-Feld + Connect-Button + Status-Anzeige.
 func buildConnectBar(conn *Connection) fyne.CanvasObject {
 	dsnEntry := widget.NewEntry()
-	dsnEntry.SetPlaceHolder("postgres://postgres:pass@localhost:5432/onisin?sslmode=disable")
+	dsnEntry.SetPlaceHolder(defaultDemoDSN)
 	dsnEntry.SetText(resolveDefaultDSN())
 
 	errorLabel := widget.NewLabel("")
