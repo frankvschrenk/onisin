@@ -22,7 +22,11 @@ var fyneWindow fyne.Window
 // StartFyneApp creates the Fyne application and runs the main event loop.
 // This function blocks until the application exits.
 func StartFyneApp() {
-	fyneApp = app.New()
+	// NewWithID sets the app identifier for Fyne's preference store
+	// and — more visibly on macOS — determines the name shown in the
+	// system menu bar. Without it, macOS falls back to the binary
+	// name ("oos_macos") which leaks the platform suffix into the UI.
+	fyneApp = app.NewWithID("com.onisin.oos")
 	fyneWindow = fyneApp.NewWindow("OOS")
 	fyneWindow.Resize(fyne.NewSize(640, 400))
 	fyneWindow.CenterOnScreen()
