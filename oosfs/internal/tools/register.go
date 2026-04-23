@@ -14,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"onisin.com/oosfs/internal/gopls"
 	"onisin.com/oosfs/internal/roots"
 )
 
@@ -32,7 +33,11 @@ func trustedMode() bool {
 // New tools are added here in one place. Keeping the list flat makes it
 // obvious what oosfs can do and simplifies code review.
 func RegisterAll(s *server.MCPServer, reg *roots.Registry, logger *slog.Logger) {
-	ctx := &handlerCtx{reg: reg, logger: logger}
+	ctx := &handlerCtx{
+		reg:    reg,
+		logger: logger,
+		gopls:  gopls.NewManager(logger),
+	}
 
 	registerList(s, ctx)
 	registerRead(s, ctx)
@@ -43,14 +48,21 @@ func RegisterAll(s *server.MCPServer, reg *roots.Registry, logger *slog.Logger) 
 	registerExecStream(s, ctx)
 	registerPatch(s, ctx)
 	registerSymbols(s, ctx)
+	registerGopls(s, ctx)
 	registerPostgres(s, ctx)
 	registerBrowser(s, ctx)
 }
 
 // handlerCtx bundles the shared state every tool handler needs.
+//
+// gopls is a *gopls.Manager that owns one long-lived gopls subprocess
+// per workspace root. It is lazily populated — the first Go LSP request
+// for a root spawns gopls for that root. Manager is always non-nil so
+// handlers can call it without a guard.
 type handlerCtx struct {
 	reg    *roots.Registry
 	logger *slog.Logger
+	gopls  *gopls.Manager
 }
 
 // jsonResult marshals v and wraps it in an MCP text result. Callers can
