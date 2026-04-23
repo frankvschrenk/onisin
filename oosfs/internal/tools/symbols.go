@@ -13,10 +13,12 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"io/fs"
 	"os"
@@ -28,16 +30,27 @@ import (
 )
 
 // symbol is one top-level Go declaration worth reporting.
+//
+// Signature is only populated for funcs and methods; it holds the
+// canonical declaration line (body stripped) so that callers can wire
+// up a call site without re-reading the source file.
+//
+// TypeKind is only populated for Kind=="type" and reports the underlying
+// category — "struct", "interface", "alias", "func", "map", "chan",
+// "slice", "array", or "ident" — again to save a round-trip for the
+// common question "what kind of thing is this type?".
 type symbol struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`     // "func" | "method" | "type" | "var" | "const"
-	File     string `json:"file"`
-	Line     int    `json:"line"`
-	EndLine  int    `json:"end_line,omitempty"`
-	Receiver string `json:"receiver,omitempty"` // for methods: "(p *EventProcessor)"
-	Exported bool   `json:"exported"`
-	Doc      string `json:"doc,omitempty"` // leading godoc comment, first line only
-	Package  string `json:"package,omitempty"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"` // "func" | "method" | "type" | "var" | "const"
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	EndLine   int    `json:"end_line,omitempty"`
+	Receiver  string `json:"receiver,omitempty"`  // for methods: "(p *EventProcessor)"
+	Signature string `json:"signature,omitempty"` // for funcs/methods: full declaration line
+	TypeKind  string `json:"type_kind,omitempty"` // for types: "struct", "interface", "alias", ...
+	Exported  bool   `json:"exported"`
+	Doc       string `json:"doc,omitempty"` // leading godoc comment, first line only
+	Package   string `json:"package,omitempty"`
 }
 
 func registerSymbols(s *server.MCPServer, ctx *handlerCtx) {
@@ -227,14 +240,15 @@ func parseFileSymbols(path string) ([]symbol, error) {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
 			s := symbol{
-				Name:     d.Name.Name,
-				Kind:     "func",
-				File:     path,
-				Line:     fset.Position(d.Pos()).Line,
-				EndLine:  fset.Position(d.End()).Line,
-				Exported: ast.IsExported(d.Name.Name),
-				Doc:      firstDocLine(d.Doc),
-				Package:  pkg,
+				Name:      d.Name.Name,
+				Kind:      "func",
+				File:      path,
+				Line:      fset.Position(d.Pos()).Line,
+				EndLine:   fset.Position(d.End()).Line,
+				Exported:  ast.IsExported(d.Name.Name),
+				Doc:       firstDocLine(d.Doc),
+				Package:   pkg,
+				Signature: renderFuncSignature(fset, d),
 			}
 			if d.Recv != nil && len(d.Recv.List) > 0 {
 				s.Kind = "method"
@@ -257,6 +271,7 @@ func parseFileSymbols(path string) ([]symbol, error) {
 						Exported: ast.IsExported(sp.Name.Name),
 						Doc:      firstDocLine(d.Doc),
 						Package:  pkg,
+						TypeKind: typeKind(sp),
 					})
 				case *ast.ValueSpec:
 					kind := "var"
@@ -280,6 +295,95 @@ func parseFileSymbols(path string) ([]symbol, error) {
 		}
 	}
 	return out, nil
+}
+
+// renderFuncSignature returns the canonical declaration line for a
+// function or method — e.g. "func (p *PGImporter) LoadCTXRaw(ctx
+// context.Context, id string) (string, error)" — by printing the AST
+// node with Body and Doc stripped.
+//
+// Stripping the body is the whole trick: go/printer happily prints a
+// FuncDecl without a block, which gives us exactly the one line we want.
+// Doc is cleared too so the printer doesn't re-emit the godoc comment
+// (the symbol struct already carries that separately).
+//
+// The node is shallow-copied before mutation so the caller's AST stays
+// pristine — important because the same file is sometimes parsed once
+// and inspected by several code paths.
+func renderFuncSignature(fset *token.FileSet, fn *ast.FuncDecl) string {
+	if fn == nil || fn.Name == nil {
+		return ""
+	}
+	stripped := *fn
+	stripped.Body = nil
+	stripped.Doc = nil
+
+	var buf bytes.Buffer
+	cfg := printer.Config{Mode: printer.UseSpaces, Tabwidth: 4}
+	if err := cfg.Fprint(&buf, fset, &stripped); err != nil {
+		return ""
+	}
+	// A few printers emit a trailing newline; collapse internal
+	// whitespace so the result fits on one line even for multi-line
+	// parameter lists in the source.
+	return collapseWhitespace(buf.String())
+}
+
+// typeKind categorises a TypeSpec by its underlying AST node. Covers the
+// common cases a developer asks about when browsing a package — struct,
+// interface, type alias — and falls back to "ident" / "expr" for the
+// long tail.
+func typeKind(sp *ast.TypeSpec) string {
+	if sp == nil || sp.Type == nil {
+		return ""
+	}
+	if sp.Assign.IsValid() {
+		// "type Foo = Bar" is an alias, regardless of what Bar is.
+		return "alias"
+	}
+	switch sp.Type.(type) {
+	case *ast.StructType:
+		return "struct"
+	case *ast.InterfaceType:
+		return "interface"
+	case *ast.FuncType:
+		return "func"
+	case *ast.MapType:
+		return "map"
+	case *ast.ChanType:
+		return "chan"
+	case *ast.ArrayType:
+		// Go's AST uses ArrayType for both arrays and slices; the
+		// difference is whether Len is nil.
+		if at, ok := sp.Type.(*ast.ArrayType); ok && at.Len == nil {
+			return "slice"
+		}
+		return "array"
+	case *ast.Ident, *ast.SelectorExpr, *ast.StarExpr:
+		return "ident"
+	}
+	return "expr"
+}
+
+// collapseWhitespace folds newlines and runs of spaces/tabs into single
+// spaces. Used to render multi-line function signatures as a single line
+// without disturbing the relative order of tokens.
+func collapseWhitespace(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	space := false
+	for _, r := range s {
+		if r == '\n' || r == '\t' || r == ' ' {
+			if !space && b.Len() > 0 {
+				b.WriteByte(' ')
+				space = true
+			}
+			continue
+		}
+		b.WriteRune(r)
+		space = false
+	}
+	return strings.TrimSpace(b.String())
 }
 
 // receiverString builds a compact receiver description for methods,
