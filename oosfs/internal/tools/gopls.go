@@ -1,4 +1,5 @@
-// Tool: go_hover / go_definition / go_references / go_diagnostics / go_symbols
+// Tool: go_hover / go_definition / go_references / go_diagnostics /
+//       go_symbols / go_symbol_refs / go_package_diagnostics
 //
 // These tools front the gopls Language Server. They complement the
 // AST-based find_symbol/list_symbols (which run on a parsed file only)
@@ -6,6 +7,11 @@
 // godoc at any position, definition jumps across packages, references
 // finds every usage workspace-wide, and diagnostics reports what the
 // type-checker sees without a build round-trip.
+//
+// go_symbol_refs and go_package_diagnostics combine AST-level name
+// resolution with gopls queries so common workflows ("who uses Foo?"
+// and "is this package clean?") finish in one tool call instead of
+// three.
 //
 // Positions are 1-based line/column as users naturally think of them
 // and as editors display them. The LSP internally uses 0-based
@@ -16,6 +22,12 @@ package tools
 import (
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -84,6 +96,37 @@ func registerGopls(s *server.MCPServer, ctx *handlerCtx) {
 		mcp.WithToolAnnotation(readOnlyAnnotations("Go symbols")),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Absolute or root-relative path to a .go file")),
 	), ctx.handleGoSymbols)
+
+	s.AddTool(mcp.NewTool("go_symbol_refs",
+		mcp.WithDescription(
+			"Find every usage of a Go symbol by name, across the workspace. "+
+				"Combines AST-based symbol lookup with gopls references — no need "+
+				"to first find the declaration's line/column by hand. Searches "+
+				"inside 'path' (file or directory) for the declaration, then asks "+
+				"gopls for all references. If the name occurs at more than one "+
+				"declaration site (e.g. a method name shared across types), the "+
+				"results include references for every candidate.",
+		),
+		mcp.WithToolAnnotation(readOnlyAnnotations("Go symbol references")),
+		mcp.WithString("path", mcp.Required(), mcp.Description("File or directory to scan for the declaration")),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Symbol name (e.g. 'Internal', 'NewManager', 'Client')")),
+		mcp.WithBoolean("include_declaration", mcp.Description("Include the declaration itself in each result set (default: true)")),
+	), ctx.handleGoSymbolRefs)
+
+	s.AddTool(mcp.NewTool("go_package_diagnostics",
+		mcp.WithDescription(
+			"Run gopls diagnostics over every .go file in a package directory "+
+				"and aggregate the results. The package is defined as all .go "+
+				"files (including _test.go) in the given directory, non-recursive. "+
+				"Use this as a quick 'is this package clean?' check after a "+
+				"refactor — catches type errors, unused imports, and staticcheck "+
+				"findings without a compile cycle.",
+		),
+		mcp.WithToolAnnotation(readOnlyAnnotations("Go package diagnostics")),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Package directory (non-recursive)")),
+		mcp.WithBoolean("include_tests", mcp.Description("Include _test.go files (default: true)")),
+		mcp.WithNumber("wait_ms", mcp.Description("Max time in milliseconds to wait for each file's diagnostics (default: 2000)")),
+	), ctx.handleGoPackageDiagnostics)
 }
 
 // callDeadline is the default per-request timeout. gopls can be slow on
@@ -353,4 +396,322 @@ func uriToFilesystemPath(uri string) string {
 		return uri
 	}
 	return uri[len(prefix):]
+}
+
+// handleGoSymbolRefs resolves a symbol name to one or more declaration
+// sites under the given path, then runs go_references on each. The
+// result is a map keyed by declaration location so the caller can tell
+// apart references for two symbols that happen to share a name.
+func (c *handlerCtx) handleGoSymbolRefs(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	root, err := req.RequireString("path")
+	if err != nil {
+		return c.errResult("go_symbol_refs", err), nil
+	}
+	name, err := req.RequireString("name")
+	if err != nil {
+		return c.errResult("go_symbol_refs", err), nil
+	}
+	includeDecl := optionalBool(req, "include_declaration", true)
+
+	cctx, cancel := context.WithTimeout(ctx, callDeadline)
+	defer cancel()
+
+	abs, err := c.reg.Resolve(root)
+	if err != nil {
+		return c.errResult("go_symbol_refs", err), nil
+	}
+
+	decls, err := findSymbolDeclarations(abs, name)
+	if err != nil {
+		return c.errResult("go_symbol_refs", err), nil
+	}
+	if len(decls) == 0 {
+		return jsonResult(map[string]any{
+			"name":         name,
+			"path":         abs,
+			"count":        0,
+			"declarations": []any{},
+		}), nil
+	}
+
+	// Every declaration might live in a different workspace root.
+	// Resolve each one's gopls client and issue references; skip
+	// declarations the resolver can't attribute.
+	declOut := make([]map[string]any, 0, len(decls))
+	for _, d := range decls {
+		goroot := c.goplsRootFor(d.File)
+		if goroot == "" {
+			declOut = append(declOut, map[string]any{
+				"file":   d.File,
+				"line":   d.Line,
+				"column": d.Column,
+				"error":  "no allowed root contains this file",
+			})
+			continue
+		}
+		cl, err := c.gopls.For(cctx, goroot)
+		if err != nil {
+			declOut = append(declOut, map[string]any{
+				"file":   d.File,
+				"line":   d.Line,
+				"column": d.Column,
+				"error":  err.Error(),
+			})
+			continue
+		}
+		locs, err := cl.References(cctx, d.File, d.Line-1, d.Column-1, includeDecl)
+		if err != nil {
+			declOut = append(declOut, map[string]any{
+				"file":   d.File,
+				"line":   d.Line,
+				"column": d.Column,
+				"error":  err.Error(),
+			})
+			continue
+		}
+		declOut = append(declOut, map[string]any{
+			"file":      d.File,
+			"line":      d.Line,
+			"column":    d.Column,
+			"kind":      d.Kind,
+			"receiver":  d.Receiver,
+			"signature": d.Signature,
+			"count":     len(locs),
+			"results":   locationsJSON(locs),
+		})
+	}
+
+	return jsonResult(map[string]any{
+		"name":         name,
+		"path":         abs,
+		"count":        len(declOut),
+		"declarations": declOut,
+	}), nil
+}
+
+// handleGoPackageDiagnostics iterates every .go file in the given
+// directory (non-recursive) and aggregates gopls diagnostics. Files
+// are opened in parallel via the same gopls client — the client's
+// internal mutex serializes the underlying LSP writes. The per-file
+// wait_ms bounds the total runtime.
+func (c *handlerCtx) handleGoPackageDiagnostics(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	dir, err := req.RequireString("path")
+	if err != nil {
+		return c.errResult("go_package_diagnostics", err), nil
+	}
+	includeTests := optionalBool(req, "include_tests", true)
+	waitMs := optionalInt(req, "wait_ms", 2000)
+
+	cctx, cancel := context.WithTimeout(ctx, callDeadline)
+	defer cancel()
+
+	abs, err := c.reg.Resolve(dir)
+	if err != nil {
+		return c.errResult("go_package_diagnostics", err), nil
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return c.errResult("go_package_diagnostics", err), nil
+	}
+	if !info.IsDir() {
+		return c.errResult("go_package_diagnostics", fmt.Errorf("not a directory: %s", abs)), nil
+	}
+
+	files, err := goFilesIn(abs, includeTests)
+	if err != nil {
+		return c.errResult("go_package_diagnostics", err), nil
+	}
+	if len(files) == 0 {
+		return jsonResult(map[string]any{
+			"package": abs,
+			"files":   0,
+			"count":   0,
+			"results": []any{},
+		}), nil
+	}
+
+	root := c.goplsRootFor(abs)
+	if root == "" {
+		return c.errResult("go_package_diagnostics", fmt.Errorf("no allowed root contains %s", abs)), nil
+	}
+	cl, err := c.gopls.For(cctx, root)
+	if err != nil {
+		return c.errResult("go_package_diagnostics", err), nil
+	}
+
+	// Open every file first so gopls starts analyzing them in
+	// parallel, then collect diagnostics with a bounded wait per file.
+	for _, f := range files {
+		if err := cl.EnsureOpen(cctx, f); err != nil {
+			// An unreadable file shouldn't abort the whole package
+			// scan — record it but continue.
+			c.logger.Warn("go_package_diagnostics: open failed", "file", f, "err", err)
+		}
+	}
+
+	all := make([]map[string]any, 0)
+	fileSummary := make([]map[string]any, 0, len(files))
+	for _, f := range files {
+		waitCtx, cancelWait := context.WithTimeout(cctx, time.Duration(waitMs)*time.Millisecond)
+		diags := cl.WaitForDiagnostics(waitCtx, f)
+		cancelWait()
+		fileSummary = append(fileSummary, map[string]any{
+			"file":  f,
+			"count": len(diags),
+		})
+		for _, d := range diags {
+			all = append(all, map[string]any{
+				"file":     f,
+				"severity": gopls.SeverityName(d.Severity),
+				"message":  d.Message,
+				"source":   d.Source,
+				"code":     d.Code,
+				"range":    rangeJSON(d.Range),
+			})
+		}
+	}
+
+	return jsonResult(map[string]any{
+		"package":   abs,
+		"files":     len(files),
+		"by_file":   fileSummary,
+		"count":     len(all),
+		"results":   all,
+	}), nil
+}
+
+// symbolDecl is the position of one declaration found by AST scanning.
+// Column is 1-based and points at the first character of the symbol
+// name itself (not the keyword or receiver).
+type symbolDecl struct {
+	File      string
+	Line      int
+	Column    int
+	Kind      string // "func" | "method" | "type" | "var" | "const"
+	Receiver  string
+	Signature string
+}
+
+// findSymbolDeclarations scans `root` (file or directory, recursively)
+// for every top-level declaration whose name equals `name`. Unlike the
+// existing find_symbol helper, it also records the precise column of
+// the identifier so gopls can be queried at that exact position.
+//
+// Parse errors on individual files are swallowed — a broken file in an
+// otherwise-healthy repo shouldn't abort the scan.
+func findSymbolDeclarations(root, name string) ([]symbolDecl, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	if info.IsDir() {
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if heavyDirs[d.Name()] {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if strings.HasSuffix(d.Name(), ".go") {
+				files = append(files, p)
+			}
+			return nil
+		})
+	} else {
+		if !strings.HasSuffix(root, ".go") {
+			return nil, fmt.Errorf("not a Go file: %s", root)
+		}
+		files = []string{root}
+	}
+
+	fset := token.NewFileSet()
+	var out []symbolDecl
+	for _, f := range files {
+		file, err := parser.ParseFile(fset, f, nil, parser.SkipObjectResolution)
+		if err != nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Name.Name != name {
+					continue
+				}
+				pos := fset.Position(d.Name.Pos())
+				sd := symbolDecl{
+					File:      f,
+					Line:      pos.Line,
+					Column:    pos.Column,
+					Signature: renderFuncSignature(fset, d),
+				}
+				if d.Recv != nil && len(d.Recv.List) > 0 {
+					sd.Kind = "method"
+					sd.Receiver = receiverString(d.Recv.List[0])
+				} else {
+					sd.Kind = "func"
+				}
+				out = append(out, sd)
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					switch sp := spec.(type) {
+					case *ast.TypeSpec:
+						if sp.Name.Name == name {
+							pos := fset.Position(sp.Name.Pos())
+							out = append(out, symbolDecl{
+								File:   f,
+								Line:   pos.Line,
+								Column: pos.Column,
+								Kind:   "type",
+							})
+						}
+					case *ast.ValueSpec:
+						kind := "var"
+						if d.Tok == token.CONST {
+							kind = "const"
+						}
+						for _, ident := range sp.Names {
+							if ident.Name == name {
+								pos := fset.Position(ident.Pos())
+								out = append(out, symbolDecl{
+									File:   f,
+									Line:   pos.Line,
+									Column: pos.Column,
+									Kind:   kind,
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// goFilesIn returns every .go file in dir (non-recursive). _test.go
+// files are filtered out when includeTests is false.
+func goFilesIn(dir string, includeTests bool) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		n := e.Name()
+		if !strings.HasSuffix(n, ".go") {
+			continue
+		}
+		if !includeTests && strings.HasSuffix(n, "_test.go") {
+			continue
+		}
+		out = append(out, filepath.Join(dir, n))
+	}
+	return out, nil
 }

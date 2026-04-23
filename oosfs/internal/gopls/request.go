@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Hover calls textDocument/hover at the given zero-based position.
@@ -181,14 +182,7 @@ func normalizeHoverContents(raw json.RawMessage) (HoverContents, error) {
 				parts = append(parts, sub.Value)
 			}
 		}
-		joined := ""
-		for i, p := range parts {
-			if i > 0 {
-				joined += "\n\n"
-			}
-			joined += p
-		}
-		return HoverContents{Kind: "markdown", Value: joined}, nil
+		return HoverContents{Kind: "markdown", Value: strings.Join(parts, "\n\n")}, nil
 	}
 	return HoverContents{}, errors.New("unexpected hover contents shape")
 }
