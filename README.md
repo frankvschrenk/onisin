@@ -40,6 +40,12 @@ hallucinated field names, no invented queries.
 | `oos-dsl-base`| DSL parser and node types                                        |
 | `oos-demo`    | Local demo orchestrator — installs binaries, seeds DB, boots OOS |
 
+## Running it locally
+
+See [DEMO.md](./DEMO.md) for the step-by-step walkthrough: prerequisites
+(Go, PostgreSQL + pgvector, Ollama), seeding the database, and starting
+the desktop client.
+
 ## Status
 
 Active development. The public API, wire formats and DSL are
