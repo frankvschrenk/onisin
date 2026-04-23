@@ -185,8 +185,15 @@ func (s *PostgresStore) buildASTFromDB() error {
 		if err := rows.Scan(&id, &xmlStr); err != nil {
 			return fmt.Errorf("oos.ctx scan: %w", err)
 		}
+		// Meta rows in oos.ctx that are not context definitions.
+		// "groups" is handled below; "theme" is served by GetTheme()
+		// and must not be parsed as a context (its root is <oos-theme>,
+		// which the ctx parser rightly rejects).
 		if id == "groups" {
 			groupsXML = xmlStr
+			continue
+		}
+		if id == "theme" {
 			continue
 		}
 		f, err := dsl.ParseBytes([]byte(xmlStr), id+".ctx.xml")

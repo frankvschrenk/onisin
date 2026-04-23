@@ -349,7 +349,9 @@ func (h *handler) theme(c echo.Context) error {
 	if err != nil {
 		return errJSON(c, http.StatusInternalServerError, err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]string{"theme": theme})
+	// Response key is "xml" to match the other ctx endpoints; the client
+	// parses this generically rather than keying on the ctx id.
+	return c.JSON(http.StatusOK, map[string]string{"xml": theme})
 }
 
 func (h *handler) dsl(c echo.Context) error {
