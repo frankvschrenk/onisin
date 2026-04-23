@@ -80,7 +80,10 @@ func registerMeta(s *server.MCPServer, ctx *handlerCtx) {
 		mcp.WithToolAnnotation(destructiveAnnotations("Git commit", false)),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Directory inside a git working tree")),
 		mcp.WithString("message", mcp.Required(), mcp.Description("Commit message (may contain newlines)")),
-		mcp.WithArray("paths", mcp.Description("Optional list of paths to stage; if empty, stages all tracked changes")),
+		mcp.WithArray("paths",
+			mcp.Description("Optional list of paths to stage; if empty, stages all tracked changes"),
+			mcp.Items(map[string]any{"type": "string"}),
+		),
 		mcp.WithBoolean("push", mcp.Description("Push to the current branch's upstream after committing (default: false)")),
 		mcp.WithBoolean("allow_empty", mcp.Description("Permit a commit that records no changes (default: false)")),
 	)
