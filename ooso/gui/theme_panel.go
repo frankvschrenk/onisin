@@ -28,12 +28,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// themeCTXID is the oos.ctx row the desktop client reads the active
-// theme from (via oosp's /theme endpoint). Must match the id used by
-// oos-demo's seed and by oosp.GetTheme() — all three point at the
-// same row.
-const themeCTXID = "theme"
-
 // buildThemePanel baut den Theme-Editor und gibt ihn zusammen mit
 // einer openPreview-Funktion zurück.
 func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
@@ -233,8 +227,23 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 	widgetList.Select(0)
 	buildEditor(xtheme.ForWidget(kinds[0]))
 
+	// Switching the variant reloads the corresponding theme row from
+	// oos.config; light and dark are two independent rows, so this
+	// really is a fetch, not just a flag flip on the current theme.
+	// If the row is missing, we fall back to the compiled-in default
+	// for that variant so the editor always starts on real colours.
 	variantRadio := widget.NewRadioGroup([]string{"light", "dark"}, func(v string) {
-		xtheme.Variant = v
+		loaded := oostheme.DefaultTheme(v)
+		if conn.IsConnected() {
+			if xml, err := conn.Importer().LoadThemeXML(v); err == nil && xml != "" {
+				if parsed, perr := oostheme.ParseXML(xml); perr == nil {
+					loaded = parsed
+				}
+			}
+		}
+		xtheme = loaded
+		buildEditor(xtheme.ForWidget(kinds[0]))
+		widgetList.Select(0)
 		refreshAll()
 	})
 	variantRadio.SetSelected("light")
@@ -308,7 +317,10 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 			}, getWindow())
 		}),
 		widget.NewToolbarSeparator(),
-		// In CTX speichern
+		// Save into oos.config under theme.<variant>. The variant in
+		// the theme's own <oos-theme variant="..."> attribute decides
+		// which row we target, so the editor writes where the desktop
+		// client will later read.
 		widget.NewToolbarAction(theme.UploadIcon(), func() {
 			if !conn.IsConnected() {
 				statusLabel.SetText("nicht verbunden")
@@ -319,19 +331,20 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 				statusLabel.SetText(err.Error())
 				return
 			}
-			if err := conn.Importer().ImportCTXFile(themeCTXID, xml); err != nil {
+			if err := conn.Importer().ImportThemeXML(xtheme.Variant, xml); err != nil {
 				statusLabel.SetText(err.Error())
 				return
 			}
-			statusLabel.SetText(fmt.Sprintf("gespeichert → oos.ctx[%s]", themeCTXID))
+			statusLabel.SetText(fmt.Sprintf("gespeichert → oos.config[theme.%s]", xtheme.Variant))
 		}),
 		widget.NewToolbarSeparator(),
-		// Reset
+		// Reset to the compiled-in default for the currently-selected
+		// variant. Keeps the radio selection so "reset dark" stays dark.
 		widget.NewToolbarAction(theme.ContentClearIcon(), func() {
-			xtheme = oostheme.DefaultTheme("light")
+			xtheme = oostheme.DefaultTheme(xtheme.Variant)
 			buildEditor(xtheme.ForWidget(kinds[0]))
 			widgetList.Select(0)
-			variantRadio.SetSelected("light")
+			variantRadio.SetSelected(xtheme.Variant)
 			refreshAll()
 			statusLabel.SetText("")
 		}),

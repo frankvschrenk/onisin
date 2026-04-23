@@ -21,7 +21,8 @@ type Services struct {
 	Embed           func(text string) ([]float32, error)
 	VectorUpsert    func(collection string, id uint64, vector []float32, payload map[string]string) error
 	VectorSearch    func(collection string, vector []float32, filter map[string]string, n uint64) (any, error)
-	GetTheme        func() (string, error)
+	GetTheme        func(variant string) (string, error)
+	SetTheme        func(variant, xml string) error
 	SchemaSearch    func(query string, n int) (any, error)
 	SchemaAll       func() (any, error)
 
@@ -55,6 +56,7 @@ func (s *Server) Start() error {
 	e.POST("/save", h.save)
 	e.POST("/mutation", h.mutation)
 	e.GET("/theme", h.theme)
+	e.POST("/theme", h.themeSave)
 	e.POST("/dsl", h.dsl)
 	e.POST("/embed", h.embed)
 	e.POST("/vector/upsert", h.vectorUpsert)

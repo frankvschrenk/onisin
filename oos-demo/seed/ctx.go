@@ -1,6 +1,7 @@
 package seed
 
-// ctx.go — imports CTX and DSL XML definitions into oos.ctx and oos.dsl.
+// ctx.go — imports CTX and DSL XML definitions into oos.ctx and oos.dsl,
+// and seeds the built-in themes into oos.config.
 
 import (
 	"database/sql"
@@ -10,17 +11,12 @@ import (
 )
 
 // seedCTX writes all CTX definition files into oos.ctx.
+//
+// Themes used to live here too (under id "theme"), but they are now
+// served from oos.config under namespaces "theme.light" / "theme.dark".
+// seedThemes below does that, and seedCTX drops the legacy row so
+// existing databases stay consistent with fresh installs.
 func seedCTX(db *sql.DB) error {
-	// Serialise the built-in default theme so the UI has a real theme
-	// to render from on first launch. Without this row the desktop
-	// client falls back to its compiled-in default, and the theme
-	// editor in ooso shows an empty skeleton — the two views then
-	// diverge visually until someone authors a theme by hand.
-	themeXML, err := oostheme.DefaultTheme("light").ToXML()
-	if err != nil {
-		return fmt.Errorf("serialise default theme: %w", err)
-	}
-
 	entries := []struct {
 		id  string
 		xml string
@@ -29,7 +25,6 @@ func seedCTX(db *sql.DB) error {
 		{"groups",      groupsXML},
 		{"person",      personCTXXML},
 		{"note",        noteCTXXML},
-		{"theme",       themeXML},
 	}
 
 	for _, e := range entries {
@@ -40,6 +35,35 @@ func seedCTX(db *sql.DB) error {
 		`, e.id, e.xml)
 		if err != nil {
 			return err
+		}
+	}
+
+	// Clean up the legacy theme row if it is still around.
+	if _, err := db.Exec(`DELETE FROM oos.ctx WHERE id = 'theme'`); err != nil {
+		return fmt.Errorf("drop legacy oos.ctx[theme]: %w", err)
+	}
+	return nil
+}
+
+// seedThemes writes the built-in light and dark themes into oos.config.
+//
+// One row per variant, keyed as "theme.<variant>". The XML goes into
+// the xml column so the row can be fetched directly by oosp's theme
+// endpoint and edited by the ooso theme panel without any envelope
+// parsing. The data and json columns stay empty.
+func seedThemes(db *sql.DB) error {
+	for _, variant := range []string{"light", "dark"} {
+		xml, err := oostheme.DefaultTheme(variant).ToXML()
+		if err != nil {
+			return fmt.Errorf("serialise %s theme: %w", variant, err)
+		}
+		ns := "theme." + variant
+		if _, err := db.Exec(`
+			INSERT INTO oos.config (namespace, xml)
+			VALUES ($1, $2)
+			ON CONFLICT (namespace) DO UPDATE SET xml = $2, updated_at = now()
+		`, ns, xml); err != nil {
+			return fmt.Errorf("upsert %s: %w", ns, err)
 		}
 	}
 	return nil

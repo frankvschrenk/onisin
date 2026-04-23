@@ -90,6 +90,52 @@ func (imp *PGImporter) ImportDSL(screenID, rawXML string) error {
 	return nil
 }
 
+// ImportThemeXML upserts the theme XML for the given variant into
+// oos.config under namespace "theme.<variant>". Variants outside
+// {light, dark} are coerced to "light" to stay consistent with the
+// validation on the oosp side.
+func (imp *PGImporter) ImportThemeXML(variant, rawXML string) error {
+	if variant != "light" && variant != "dark" {
+		variant = "light"
+	}
+	ns := "theme." + variant
+	_, err := imp.db.Exec(`
+		INSERT INTO oos.config (namespace, xml)
+		VALUES ($1, $2)
+		ON CONFLICT (namespace) DO UPDATE
+		    SET xml        = EXCLUDED.xml,
+		        updated_at = now()
+	`, ns, rawXML)
+	if err != nil {
+		return fmt.Errorf("oos.config upsert %q: %w", ns, err)
+	}
+	return nil
+}
+
+// LoadThemeXML returns the theme XML for the given variant from
+// oos.config. Returns an empty string with no error if the row is
+// missing — the caller typically falls back to a compiled-in default.
+func (imp *PGImporter) LoadThemeXML(variant string) (string, error) {
+	if variant != "light" && variant != "dark" {
+		variant = "light"
+	}
+	ns := "theme." + variant
+	var xml sql.NullString
+	err := imp.db.QueryRow(
+		`SELECT xml FROM oos.config WHERE namespace = $1`, ns,
+	).Scan(&xml)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("oos.config select %q: %w", ns, err)
+	}
+	if !xml.Valid {
+		return "", nil
+	}
+	return xml.String, nil
+}
+
 // GetDSLIDs gibt alle bekannten DSL Screen-IDs zurück.
 func (imp *PGImporter) GetDSLIDs() ([]string, error) {
 	rows, err := imp.db.Query(`SELECT id FROM oos.dsl ORDER BY id`)

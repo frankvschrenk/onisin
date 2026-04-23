@@ -223,6 +223,7 @@ func startRESTServer(addr string) error {
 		VectorUpsert:    VectorUpsert,
 		VectorSearch:    VectorSearch,
 		GetTheme:        GetTheme,
+		SetTheme:        SetTheme,
 		SchemaSearch: func(query string, n int) (any, error) {
 			return SchemaSearch(query, n)
 		},

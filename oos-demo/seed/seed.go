@@ -67,6 +67,7 @@ func Demo(opts Options) error {
 		{"public schema",  func() error { return seedPublicSchema(conn) }},
 		{"public grants",  func() error { return seedPublicGrants(conn) }},
 		{"CTX files",      func() error { return seedCTX(conn) }},
+		{"themes",         func() error { return seedThemes(conn) }},
 		{"DSL files",      func() error { return seedDSL(conn) }},
 		{"reference data", func() error { return seedRefTables(conn) }},
 		{"persons",        func() error { return seedPersons(conn) }},

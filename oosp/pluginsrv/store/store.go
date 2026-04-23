@@ -13,6 +13,15 @@ type ContextStore interface {
 
 	GetCTXRaw(id string) (xml string, found bool, err error)
 
+	// GetConfigXML returns the xml column of the oos.config row keyed
+	// by namespace. Used for themes and other XML-typed config that
+	// does not belong in oos.ctx.
+	GetConfigXML(namespace string) (xml string, found bool, err error)
+
+	// SetConfigXML upserts the xml column of the oos.config row keyed
+	// by namespace.
+	SetConfigXML(namespace, xml string) error
+
 	GetEnvelope(contextName string, content map[string]any) (envelope map[string]any, err error)
 
 	// ContextsByCTXID returns the ContextAst slice produced by parsing the

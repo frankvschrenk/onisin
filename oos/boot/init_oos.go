@@ -62,26 +62,20 @@ func loadAndApplyTheme() {
 	var t *oostheme.OOSTheme
 
 	if helper.OOSP != nil {
-		xml, err := helper.OOSP.Call("oosp_load_theme", nil)
+		xml, err := helper.OOSP.Call("oosp_load_theme", map[string]string{
+			"variant": variant,
+		})
 		switch {
 		case err != nil:
 			log.Printf("[boot] theme load: %v — using default", err)
 		case xml == "":
-			log.Printf("[boot] no theme in oos.ctx — using default")
+			log.Printf("[boot] no theme.%s in oos.config — using default", variant)
 		default:
 			parsed, perr := oostheme.ParseXML(xml)
 			if perr != nil {
 				log.Printf("[boot] theme parse: %v — using default", perr)
 			} else {
 				t = parsed
-				// Respect the user's variant preference even when the
-				// stored theme declares the other one. Palettes in both
-				// variants share brand/accent colours, so the swap is
-				// visually consistent.
-				if t.Variant != variant {
-					log.Printf("[boot] theme variant override: %s -> %s", t.Variant, variant)
-					t.Variant = variant
-				}
 			}
 		}
 	}

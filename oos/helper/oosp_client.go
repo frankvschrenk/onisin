@@ -3,6 +3,7 @@ package helper
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 
 	"github.com/go-resty/resty/v2"
@@ -96,7 +97,11 @@ func (c *OOSPClient) Call(tool string, args map[string]string) (string, error) {
 			"content": args["content"],
 		})
 	case "oosp_load_theme":
-		raw, err := c.Get("/theme")
+		variant := args["variant"]
+		if variant == "" {
+			variant = "light"
+		}
+		raw, err := c.Get("/theme?variant=" + url.QueryEscape(variant))
 		if err != nil {
 			return "", err
 		}
@@ -107,6 +112,14 @@ func (c *OOSPClient) Call(tool string, args map[string]string) (string, error) {
 			return raw, nil // fallback: raw zurückgeben
 		}
 		return result.XML, nil
+	case "oosp_save_theme":
+		variant := args["variant"]
+		if variant == "" {
+			variant = "light"
+		}
+		return c.Post("/theme?variant="+url.QueryEscape(variant), map[string]string{
+			"xml": args["xml"],
+		})
 	case "oosp_ai_schema":
 		if id := args["id"]; id != "" {
 			return c.Get("/ai-schema/" + id)

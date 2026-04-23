@@ -88,6 +88,42 @@ func (s *PostgresStore) GetDSL(id string) (string, bool, error) {
 	return xmlStr, true, nil
 }
 
+// GetConfigXML returns the xml column of the oos.config row identified
+// by namespace. The second return value is false when the row does not
+// exist or the xml column is NULL.
+func (s *PostgresStore) GetConfigXML(namespace string) (string, bool, error) {
+	var xmlStr sql.NullString
+	err := s.db.QueryRow(
+		`SELECT xml FROM oos.config WHERE namespace = $1`, namespace,
+	).Scan(&xmlStr)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("oos.config query: %w", err)
+	}
+	if !xmlStr.Valid {
+		return "", false, nil
+	}
+	return xmlStr.String, true, nil
+}
+
+// SetConfigXML upserts the xml column of the oos.config row identified
+// by namespace. Other columns (data, json) are left untouched on update
+// and default to empty on insert.
+func (s *PostgresStore) SetConfigXML(namespace, xml string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO oos.config (namespace, xml)
+		VALUES ($1, $2)
+		ON CONFLICT (namespace) DO UPDATE
+			SET xml = $2, updated_at = now()
+	`, namespace, xml)
+	if err != nil {
+		return fmt.Errorf("oos.config upsert: %w", err)
+	}
+	return nil
+}
+
 // GetCTXRaw returns the raw XML for a CTX context definition.
 func (s *PostgresStore) GetCTXRaw(id string) (string, bool, error) {
 	var xmlStr string

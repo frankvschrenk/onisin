@@ -112,13 +112,35 @@ func VectorSearch(collection string, vector []float32, filter map[string]string,
 	return activeVector.Search(context.Background(), collection, vector, filter, n)
 }
 
-// GetTheme returns the active UI theme XML from oos.ctx.
-func GetTheme() (string, error) {
+// GetTheme returns the UI theme XML for the given variant from
+// oos.config. Valid variants are "light" and "dark"; anything else is
+// coerced to "light" so callers can pass through user input safely.
+//
+// Returns an empty string when the row is missing — the desktop client
+// then falls back to its compiled-in default for that variant.
+func GetTheme(variant string) (string, error) {
 	if activeStore == nil {
 		return "", nil
 	}
-	xml, _, err := activeStore.GetCTXRaw("theme")
+	if variant != "light" && variant != "dark" {
+		variant = "light"
+	}
+	xml, _, err := activeStore.GetConfigXML("theme." + variant)
 	return xml, err
+}
+
+// SetTheme upserts the UI theme XML for the given variant into
+// oos.config under "theme.<variant>". Variants outside {light,dark}
+// are coerced to "light" so the same validation applies on read and
+// write.
+func SetTheme(variant, xml string) error {
+	if activeStore == nil {
+		return fmt.Errorf("store not initialised")
+	}
+	if variant != "light" && variant != "dark" {
+		variant = "light"
+	}
+	return activeStore.SetConfigXML("theme."+variant, xml)
 }
 
 // SchemaAll returns all schema chunks without embedding search.

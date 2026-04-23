@@ -201,12 +201,37 @@ func setupOOSTables(db *sql.DB) error {
 			updated_at timestamptz  NOT NULL DEFAULT now()
 		);
 
-		-- oos.config — hstore-based key-value store (replaces etcd)
-		-- namespace: "oosp", "oosai", ...
+		-- oos.config — typed configuration store.
+		--
+		-- Originally a pure hstore key-value store (replaces etcd) but
+		-- grown to carry three payload shapes so callers can pick the
+		-- one that fits the content:
+		--
+		--   data  hstore  — flat key-value pairs (namespace settings).
+		--   xml   text    — structured documents (themes, prompts).
+		--   json  jsonb   — typed structured data with index support.
+		--
+		-- The row is keyed by namespace, e.g. "oosp", "theme.light",
+		-- "theme.dark". Columns are nullable independently; a given
+		-- row typically uses one of the three.
 		CREATE TABLE IF NOT EXISTS oos.config (
 			namespace  text   PRIMARY KEY,
-			data       hstore NOT NULL DEFAULT ''::hstore
+			data       hstore NOT NULL DEFAULT ''::hstore,
+			xml        text,
+			json       jsonb,
+			updated_at timestamptz NOT NULL DEFAULT now()
 		);
+
+		-- Additive migration for databases created before the xml/json
+		-- columns existed.
+		ALTER TABLE oos.config ADD COLUMN IF NOT EXISTS xml        text;
+		ALTER TABLE oos.config ADD COLUMN IF NOT EXISTS json       jsonb;
+		ALTER TABLE oos.config ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+		DROP TRIGGER IF EXISTS config_updated_at ON oos.config;
+		CREATE TRIGGER config_updated_at
+			BEFORE UPDATE ON oos.config
+			FOR EACH ROW EXECUTE FUNCTION oos.set_updated_at();
 
 		-- oos.oos_schema — CTX schema chunks for AI prompt injection.
 		-- One row per context, embedded via granite-embedding (384-dim).

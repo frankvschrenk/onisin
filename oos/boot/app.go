@@ -13,7 +13,6 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
-	oostheme "onisin.com/oos-common/theme"
 	"onisin.com/oos/helper"
 )
 
@@ -48,28 +47,18 @@ func setupMainMenu() {
 	fyneWindow.SetMainMenu(fyne.NewMainMenu(oosMenu, viewMenu))
 }
 
-// switchThemeVariant flips the active variant and persists the choice
-// to oos.toml. If the operator-authored oos.ctx[theme] declares a
-// different variant than the user just picked, the stored theme is
-// copied and the variant overridden so both palettes come from the
-// same colour set.
+// switchThemeVariant flips the active variant, persists the choice
+// to oos.toml and reloads the theme for the new variant from oos.config.
+//
+// Light and dark are two separate rows (theme.light, theme.dark), so
+// the switch is a real reload — not just a flag flip on one theme.
+// If the reload fails, we fall back to the compiled-in default for
+// the new variant so the UI still renders cleanly.
 func switchThemeVariant(variant string) {
 	if err := helper.SaveThemeVariant(variant); err != nil {
 		log.Printf("[ui] theme variant save: %v", err)
 	}
-
-	// Prefer the already-loaded theme (operator-authored) over the
-	// built-in default; just flip its variant flag so the palette
-	// resolution picks the right Fyne variant.
-	t := helper.ActiveTheme
-	if t == nil {
-		t = oostheme.DefaultTheme(variant)
-	} else {
-		copy := *t
-		copy.Variant = variant
-		t = &copy
-	}
-	ApplyTheme(t)
+	loadAndApplyTheme()
 }
 
 func showSplash() {

@@ -341,17 +341,44 @@ func (h *handler) assertActionAllowed(c echo.Context, contextName string, action
 		fmt.Sprintf("context %q not found", contextName))
 }
 
+// theme serves GET /theme?variant=light|dark and returns the XML for
+// the requested variant from oos.config. Missing variant defaults to
+// "light"; unknown variants are coerced by GetTheme.
 func (h *handler) theme(c echo.Context) error {
 	if h.svc.GetTheme == nil {
 		return errJSON(c, http.StatusServiceUnavailable, "theme not available")
 	}
-	theme, err := h.svc.GetTheme()
+	variant := c.QueryParam("variant")
+	if variant == "" {
+		variant = "light"
+	}
+	xml, err := h.svc.GetTheme(variant)
 	if err != nil {
 		return errJSON(c, http.StatusInternalServerError, err.Error())
 	}
-	// Response key is "xml" to match the other ctx endpoints; the client
-	// parses this generically rather than keying on the ctx id.
-	return c.JSON(http.StatusOK, map[string]string{"xml": theme})
+	return c.JSON(http.StatusOK, map[string]string{"xml": xml})
+}
+
+// themeSave serves POST /theme?variant=light|dark with a JSON body
+// {"xml": "..."} and upserts the row in oos.config.
+func (h *handler) themeSave(c echo.Context) error {
+	if h.svc.SetTheme == nil {
+		return errJSON(c, http.StatusServiceUnavailable, "theme not writable")
+	}
+	variant := c.QueryParam("variant")
+	if variant == "" {
+		variant = "light"
+	}
+	var body struct {
+		XML string `json:"xml"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return errJSON(c, http.StatusBadRequest, err.Error())
+	}
+	if err := h.svc.SetTheme(variant, body.XML); err != nil {
+		return errJSON(c, http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (h *handler) dsl(c echo.Context) error {
