@@ -192,12 +192,24 @@ func (c *handlerCtx) handleProjectInfo(ctx context.Context, req mcp.CallToolRequ
 	// deep. This is cheap and usually right.
 	langs := sampleLanguages(dir, 2)
 
-	return jsonResult(map[string]any{
+	// Working-tree state. Cheap enough to always include when a git
+	// root was found — callers routinely want "what branch, are we
+	// clean, are we ahead of origin?" right alongside project detection.
+	var gitState map[string]any
+	if root, _ := findGitRoot(dir); root != "" {
+		gitState = collectGitState(root)
+	}
+
+	resp := map[string]any{
 		"path":      abs,
 		"directory": dir,
 		"markers":   markers,
 		"languages": langs,
-	}), nil
+	}
+	if gitState != nil {
+		resp["git_state"] = gitState
+	}
+	return jsonResult(resp), nil
 }
 
 func (c *handlerCtx) handleGitStatus(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -455,6 +467,59 @@ func sampleLanguages(dir string, maxDepth int) map[string]int {
 	}
 	walk(dir, 0)
 	return counts
+}
+
+// collectGitState returns a compact snapshot of a git working tree:
+// branch, upstream, ahead/behind counts, and a clean flag. Callers use
+// it through project_info to get working-tree orientation in the same
+// round-trip as project structure detection.
+//
+// Parses 'git status --porcelain=v2 --branch', whose header lines are
+// documented and stable:
+//
+//	# branch.oid  <sha>
+//	# branch.head <name>              (or "(detached)")
+//	# branch.upstream <name>          (absent if no upstream)
+//	# branch.ab    +<ahead> -<behind>
+//
+// Any non-"#" line indicates a change, which alone is enough to flip
+// clean=false without parsing the porcelain entry.
+func collectGitState(root string) map[string]any {
+	out, err := runGit(root, "status", "--porcelain=v2", "--branch")
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	state := map[string]any{
+		"root":  root,
+		"clean": true,
+	}
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		switch {
+		case line == "":
+			continue
+		case strings.HasPrefix(line, "# branch.head "):
+			state["branch"] = strings.TrimPrefix(line, "# branch.head ")
+		case strings.HasPrefix(line, "# branch.upstream "):
+			state["upstream"] = strings.TrimPrefix(line, "# branch.upstream ")
+		case strings.HasPrefix(line, "# branch.ab "):
+			ab := strings.TrimPrefix(line, "# branch.ab ")
+			// Format: "+N -M". Leave as string on parse failure —
+			// callers can still display the raw counter.
+			var ahead, behind int
+			if _, err := fmt.Sscanf(ab, "+%d -%d", &ahead, &behind); err == nil {
+				state["ahead"] = ahead
+				state["behind"] = behind
+			} else {
+				state["ab_raw"] = ab
+			}
+		case strings.HasPrefix(line, "#"):
+			// Other header line (branch.oid, etc.) — ignored.
+		default:
+			// Any non-header line means the working tree has changes.
+			state["clean"] = false
+		}
+	}
+	return state
 }
 
 // runGit executes git in dir and returns stdout, capturing stderr in the error
