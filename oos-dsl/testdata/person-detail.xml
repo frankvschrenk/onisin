@@ -1,0 +1,158 @@
+<!--
+  person-detail.dsl.xml — Loomer-Datei für person_detail.
+  Beschreibt Layout, Widget-Wahl und Beschriftungen.
+
+  Kontext:  person.ctx.xml → person_detail
+  Daten:    person-detail.json (meta/data/options)
+
+  Was hier steht und NICHT in der CTX:
+    label="..."         Feldbezeichnung im UI
+    format="cur|num"    Darstellungsformat
+    widget="..."        Welches Widget für dieses Feld
+    options="..."       Auswahloptionen (kommen aus JSON)
+    placeholder="..."   Eingabehilfe
+-->
+<screen id="person_detail" title="Person — Detail" label-color="primary">
+
+  <!-- Toolbar -->
+  <toolbar>
+    <button action="on_edit"   style="edit"   label="Bearbeiten"/>
+    <button action="on_notes"  style="info"   label="Notizen"/>
+    <sep/>
+    <button action="on_delete" style="delete" label="Löschen"/>
+  </toolbar>
+
+  <!-- Kopfzeile -->
+  <box orient="horizontal" p="3">
+    <icon name="account" size="48"/>
+    <box orient="vertical" ml="3" expand="true">
+      <richtext>
+        <span style="heading">Dr. Elena Kovač</span>
+        <span style="bold">Senior Enterprise Architektin</span>
+        <span>Zuständig für alle Cloud- und On-Premise-Projekte im DACH-Raum.</span>
+      </richtext>
+      <hyperlink text="Profil im Intranet öffnen" url="https://intranet.onisin.ai/people/42"/>
+    </box>
+  </box>
+
+  <sep/>
+
+  <tabs p="2">
+
+    <!-- ── Tab 1: Stammdaten ─────────────────────────────────── -->
+    <tab label="Stammdaten">
+
+      <section label="Persönliche Daten" p="3">
+        <field label="ID" bind="person.id" readonly="true"/>
+        <section cols="2" gap="4" mt="2">
+          <field focus="true" label="Vorname"  bind="person.firstname"/>
+          <field              label="Nachname" bind="person.lastname"/>
+          <field              label="Titel"    bind="person.title"    placeholder="Dr., Prof., ..."/>
+          <field              label="Alter"    bind="person.age"/>
+        </section>
+        <section cols="2" gap="4" mt="2">
+          <field label="Vermögen (EUR)" bind="person.net_worth" format="cur"/>
+          <field label="Profil-Vollständigkeit" bind="person.profile_complete" widget="progress"/>
+        </section>
+      </section>
+
+      <section label="Zugehörigkeit" p="3" pt="0">
+        <section cols="2" gap="4">
+          <field label="Rolle"      bind="person.role"       widget="choices" options="roles"/>
+          <field label="Abteilung"  bind="person.department" widget="choices" options="departments"/>
+        </section>
+        <section cols="2" gap="4" mt="2">
+          <field label="Anstellungsart" bind="person.employment" widget="radio" options="employment_types"/>
+          <field label="Aktiv"          bind="person.active"     widget="check" label="Mitarbeiter aktiv"/>
+        </section>
+      </section>
+
+    </tab>
+
+    <!-- ── Tab 2: Kontakt & Adresse ──────────────────────────── -->
+    <tab label="Kontakt">
+
+      <section label="Adresse" p="3">
+        <field label="Straße" bind="person.street" placeholder="Musterstraße 1"/>
+        <section cols="3" gap="4" mt="2">
+          <field label="PLZ"   bind="person.zip"     placeholder="80000"/>
+          <field label="Stadt" bind="person.city"    widget="choices" options="cities"/>
+          <field label="Land"  bind="person.country" widget="choices" options="countries"/>
+        </section>
+      </section>
+
+      <section label="Kommunikation" p="3" pt="0">
+        <section cols="2" gap="4">
+          <field label="E-Mail"    bind="person.email"    placeholder="name@firma.de"/>
+          <field label="Telefon"   bind="person.phone"    placeholder="+49 ..."/>
+          <field label="Mobil"     bind="person.mobile"   placeholder="+49 170 ..."/>
+          <field label="LinkedIn"  bind="person.linkedin" placeholder="linkedin.com/in/..."/>
+        </section>
+        <hyperlink text="E-Mail senden" url="mailto:elena.kovac@onisin.ai" mt="2"/>
+      </section>
+
+    </tab>
+
+    <!-- ── Tab 3: Einstellungen ───────────────────────────────── -->
+    <tab label="Einstellungen">
+
+      <section label="Benachrichtigungen" p="3">
+        <field label="Bevorzugter Kanal" bind="person.notify_channel" widget="radio" options="notify_channels"/>
+        <section cols="2" gap="4" mt="3">
+          <check bind="person.notify_email"  label="Per E-Mail"/>
+          <check bind="person.notify_push"   label="Push-Benachrichtigung"/>
+          <check bind="person.notify_sms"    label="Per SMS"/>
+          <check bind="person.notify_weekly" label="Wöchentliche Zusammenfassung"/>
+        </section>
+      </section>
+
+      <section label="Darstellung" p="3" pt="0">
+        <field label="Sprache"       bind="person.language"  widget="choices" options="languages"/>
+        <field label="Schriftgröße"  bind="person.font_size" widget="slider"  min="10" max="24" step="1" mt="2"/>
+      </section>
+
+    </tab>
+
+    <!-- ── Tab 4: System ──────────────────────────────────────── -->
+    <tab label="System">
+
+      <accordion p="3">
+
+        <accordion-item label="Notizen" open="true">
+          <textarea bind="person.notes"
+                    placeholder="Interne Notizen zur Person..."
+                    p="2"/>
+        </accordion-item>
+
+        <accordion-item label="Zugriffsrechte">
+          <richtext markdown="true">## Berechtigungen
+
+**Rolle:** Administrator
+
+Zugriff auf alle Module. Schreibrechte für: Personen, Projekte, Abrechnung.
+
+Letzte Änderung: `2025-11-14`</richtext>
+        </accordion-item>
+
+        <accordion-item label="Technische Informationen">
+          <section cols="2" gap="4" p="2">
+            <field label="Erstellt am"  bind="person.created_at" readonly="true"/>
+            <field label="Geändert am"  bind="person.updated_at" readonly="true"/>
+            <field label="UUID"         bind="person.uuid"       readonly="true"/>
+            <field label="Quelle"       bind="person.source"     readonly="true"/>
+          </section>
+        </accordion-item>
+
+      </accordion>
+
+    </tab>
+
+  </tabs>
+
+  <!-- Footer -->
+  <box orient="horizontal" align="right" mt="4" mr="4" mb="3">
+    <button label="Abbrechen" action="cancel" style="cancel"/>
+    <button label="Speichern" action="save"   style="save"/>
+  </box>
+
+</screen>

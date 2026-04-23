@@ -1,0 +1,84 @@
+{
+  "content": {
+    "person": {
+      "id":               42,
+      "title":            "Dr.",
+      "firstname":        "Elena",
+      "lastname":         "Kovač",
+      "age":              38,
+      "role":             "admin",
+      "department":       "architecture",
+      "employment":       "fulltime",
+      "active":           true,
+      "profile_complete": 0.82,
+      "street":           "Leopoldstraße 18",
+      "zip":              "80802",
+      "city":             "1",
+      "country":          "de",
+      "email":            "elena.kovac@onisin.ai",
+      "phone":            "+49 89 4512 0",
+      "mobile":           "+49 170 9823 441",
+      "linkedin":         "linkedin.com/in/elena-kovac",
+      "notify_channel":   "push",
+      "notify_email":     true,
+      "notify_push":      true,
+      "notify_sms":       false,
+      "notify_weekly":    true,
+      "language":         "de",
+      "font_size":        14,
+      "notes":            "Ansprechpartnerin für alle Cloud-Projekte im DACH-Raum.",
+      "created_at":       "2023-03-15 09:12:44",
+      "updated_at":       "2025-11-14 17:03:21",
+      "uuid":             "f3a2c7b1-9e44-4d0f-8c1e-2b5d6a0e3f9c",
+      "source":           "Keycloak / OIDC"
+    }
+  },
+  "meta": {
+    "roles": [
+      {"value": "admin",   "label": "Administrator"},
+      {"value": "manager", "label": "Manager"},
+      {"value": "user",    "label": "Benutzer"},
+      {"value": "guest",   "label": "Gast"}
+    ],
+    "departments": [
+      {"value": "architecture", "label": "Enterprise Architektur"},
+      {"value": "development",  "label": "Softwareentwicklung"},
+      {"value": "operations",   "label": "Betrieb & Infrastruktur"},
+      {"value": "sales",        "label": "Vertrieb"},
+      {"value": "hr",           "label": "Personal"}
+    ],
+    "employment_types": [
+      {"value": "fulltime",  "label": "Vollzeit"},
+      {"value": "parttime",  "label": "Teilzeit"},
+      {"value": "freelance", "label": "Freiberuflich"},
+      {"value": "intern",    "label": "Praktikum"}
+    ],
+    "cities": [
+      {"value": "1", "label": "München"},
+      {"value": "2", "label": "Berlin"},
+      {"value": "3", "label": "Hamburg"},
+      {"value": "4", "label": "Frankfurt"},
+      {"value": "5", "label": "Köln"},
+      {"value": "6", "label": "Wien"},
+      {"value": "7", "label": "Zürich"},
+      {"value": "8", "label": "London"}
+    ],
+    "countries": [
+      {"value": "de", "label": "Deutschland"},
+      {"value": "at", "label": "Österreich"},
+      {"value": "ch", "label": "Schweiz"},
+      {"value": "nl", "label": "Niederlande"},
+      {"value": "gb", "label": "Vereinigtes Königreich"}
+    ],
+    "notify_channels": [
+      {"value": "push",  "label": "Push"},
+      {"value": "email", "label": "E-Mail"},
+      {"value": "sms",   "label": "SMS"}
+    ],
+    "languages": [
+      {"value": "de", "label": "Deutsch"},
+      {"value": "en", "label": "English"},
+      {"value": "fr", "label": "Français"}
+    ]
+  }
+}

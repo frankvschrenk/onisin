@@ -1,0 +1,39 @@
+{
+  "rows": [
+    {
+      "name": "Admin Meier",
+      "email": "admin@onisin.ai",
+      "role": "admin",
+      "department": "Engineering",
+      "active": true
+    },
+    {
+      "name": "User Müller",
+      "email": "user@onisin.ai",
+      "role": "user",
+      "department": "Engineering",
+      "active": true
+    },
+    {
+      "name": "Anna Schmidt",
+      "email": "anna@onisin.ai",
+      "role": "user",
+      "department": "Sales",
+      "active": true
+    },
+    {
+      "name": "Peter Wagner",
+      "email": "peter@onisin.ai",
+      "role": "guest",
+      "department": "HR",
+      "active": false
+    },
+    {
+      "name": "Maria Bauer",
+      "email": "maria@onisin.ai",
+      "role": "admin",
+      "department": "Management",
+      "active": true
+    }
+  ]
+}

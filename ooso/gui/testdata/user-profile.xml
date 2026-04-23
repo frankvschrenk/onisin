@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  person.detail.dsl.xml — Loomer-Datei
+  Beschreibt NUR das Layout und die Widgets.
+  Was "role" bedeutet und woher die Werte kommen steht in person.ctx.xml (Synthetist).
+  Die konkreten Auswahlwerte kommen zur Laufzeit aus JSON options.role.
+-->
+<screen id="user-profile" title="Benutzerprofil">
+
+  <grid cols="2" padding="all">
+
+    <form label="Persönliche Daten">
+      <entry label="Vorname"  bind="user.firstname" placeholder="Max"/>
+      <entry label="Nachname" bind="user.lastname"  placeholder="Mustermann"/>
+      <entry label="E-Mail"   bind="user.email"     placeholder="max@example.com"/>
+
+      <!-- options="role" → Werte kommen aus JSON options.role zur Laufzeit -->
+      <choices label="Rolle" bind="user.role" options="role"/>
+
+      <!-- city als choices mit einfachen String-Werten -->
+      <choices label="Stadt" bind="user.address.city" options="city"/>
+    </form>
+
+    <box orient="vertical">
+      <label text="Adresse und Kontakt"/>
+      <tabs>
+        <tab label="Adresse">
+          <form>
+            <entry label="Straße"   bind="user.address.street" placeholder="Musterstraße 1"/>
+            <entry label="Telefon"  bind="user.phone"          placeholder="+49 ..."/>
+          </form>
+        </tab>
+        <tab label="Kontakt">
+          <form>
+            <entry label="E-Mail" bind="user.email" placeholder="max@example.com"/>
+          </form>
+        </tab>
+      </tabs>
+    </box>
+
+  </grid>
+
+  <box orient="horizontal" align="right" padding="top">
+    <button label="Abbrechen" action="cancel" style="cancel"/>
+    <button label="Speichern" action="save"   style="primary"/>
+  </box>
+
+</screen>

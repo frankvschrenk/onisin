@@ -1,0 +1,233 @@
+# =============================================================================
+# Makefile — onisin root (run from /onisin/)
+#
+# make compile         — build all modules into dist/
+# make compile-oos     — build oos (Fyne desktop client)
+# make compile-ooso    — build ooso (importer + designer)
+# make compile-oosp    — build oosp (plugin server)
+# make compile-oosb    — build oosb (MCP bridge, retired — kept for reference)
+# make compile-oos-demo— build oos-demo (native process manager)
+# make tidy            — go mod tidy across all modules
+# make release         — create GitHub release from dist/
+# make deploy          — build + push Docker images
+# make clean           — remove dist/
+# =============================================================================
+
+REGISTRY      = docker.io/oosai
+IMAGE_OOSP    = $(REGISTRY)/oosp
+PLATFORM      = linux/amd64,linux/arm64
+
+DIST          = $(shell pwd)/dist
+VERSION_FILE  = $(DIST)/.version
+RELEASES_DIR  = $(shell pwd)/releases
+
+COMPILE_VERSION := $(shell date +"%y.%-j.%H%M")
+NATIVE_OS       := $(shell go env GOOS)
+NATIVE_ARCH     := $(shell go env GOARCH)
+
+LDFLAGS = -ldflags="-X 'main.VERSION=$(COMPILE_VERSION)'"
+
+export CGO_LDFLAGS = -Wl,-no_warn_duplicate_libraries
+
+.PHONY: compile compile-oos compile-ooso compile-oosb compile-oosp \
+        compile-oos-demo release deploy clean tidy help run-oosp-local \
+        check-oos-dsl check-oos-common
+
+# -----------------------------------------------------------------------------
+# compile — all modules
+# -----------------------------------------------------------------------------
+
+compile: compile-oos compile-ooso compile-oosb compile-oosp compile-oos-demo
+	@echo $(COMPILE_VERSION) > $(VERSION_FILE)
+	@echo ""
+	@echo "✅ dist/"
+	@ls -lh $(DIST)/
+
+# -----------------------------------------------------------------------------
+# Shared module checks
+# -----------------------------------------------------------------------------
+
+check-oos-dsl:
+	@cd oos-dsl && go vet ./...
+
+check-oos-common:
+	@cd oos-common && go vet ./...
+
+# -----------------------------------------------------------------------------
+# oos — Fyne desktop client (CGO, native)
+# -----------------------------------------------------------------------------
+
+compile-oos:
+	@mkdir -p $(DIST)
+	@echo "⚙️  oos — $(COMPILE_VERSION)"
+ifeq ($(NATIVE_OS),darwin)
+	@cd oos && \
+		CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oos_mac_amd64 . && \
+		CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o $(DIST)/oos_mac_arm64 .
+	@lipo -create -output $(DIST)/oos_macos $(DIST)/oos_mac_amd64 $(DIST)/oos_mac_arm64
+	@rm $(DIST)/oos_mac_amd64 $(DIST)/oos_mac_arm64
+	@echo "✅ dist/oos_macos"
+else ifeq ($(NATIVE_OS),linux)
+	@cd oos && CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oos_linux_amd64 .
+	@echo "✅ dist/oos_linux_amd64"
+endif
+
+# -----------------------------------------------------------------------------
+# ooso — importer + designer (CGO, native)
+# -----------------------------------------------------------------------------
+
+compile-ooso: check-oos-dsl
+	@mkdir -p $(DIST)
+	@echo "⚙️  ooso — $(COMPILE_VERSION)"
+ifeq ($(NATIVE_OS),darwin)
+	@cd ooso && \
+		CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/ooso_mac_amd64 . && \
+		CGO_ENABLED=1 GOOS=darwin GOARCH=arm64  go build $(LDFLAGS) -o $(DIST)/ooso_mac_arm64 .
+	@lipo -create -output $(DIST)/ooso_macos $(DIST)/ooso_mac_amd64 $(DIST)/ooso_mac_arm64
+	@rm $(DIST)/ooso_mac_amd64 $(DIST)/ooso_mac_arm64
+	@echo "✅ dist/ooso_macos"
+else ifeq ($(NATIVE_OS),linux)
+	@cd ooso && CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/ooso_linux_amd64 .
+	@echo "✅ dist/ooso_linux_amd64"
+endif
+
+# -----------------------------------------------------------------------------
+# oosb — MCP bridge (CGO_ENABLED=0, all platforms)
+# -----------------------------------------------------------------------------
+
+compile-oosb:
+	@mkdir -p $(DIST)
+	@echo "⚙️  oosb — $(COMPILE_VERSION)"
+	@cd oosb && \
+		CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oosb_mac_amd64 . && \
+		CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64  go build $(LDFLAGS) -o $(DIST)/oosb_mac_arm64 .
+	@lipo -create -output $(DIST)/oosb_macos $(DIST)/oosb_mac_amd64 $(DIST)/oosb_mac_arm64
+	@rm $(DIST)/oosb_mac_amd64 $(DIST)/oosb_mac_arm64
+	@cd oosb && \
+		CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oosb_linux_amd64 . && \
+		CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oosb_windows_amd64.exe .
+	@echo "✅ dist/oosb_*"
+
+# -----------------------------------------------------------------------------
+# oosp — plugin server (CGO_ENABLED=0, all platforms)
+# -----------------------------------------------------------------------------
+
+compile-oosp:
+	@mkdir -p $(DIST)
+	@echo "⚙️  oosp — $(COMPILE_VERSION)"
+	@cd oosp && \
+		CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oosp_mac_amd64 . && \
+		CGO_ENABLED=0 GOOS=darwin  GOARCH=arm64  go build $(LDFLAGS) -o $(DIST)/oosp_mac_arm64 .
+	@lipo -create -output $(DIST)/oosp_macos $(DIST)/oosp_mac_amd64 $(DIST)/oosp_mac_arm64
+	@rm $(DIST)/oosp_mac_amd64 $(DIST)/oosp_mac_arm64
+	@cd oosp && \
+		CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oosp_linux_amd64 . && \
+		CGO_ENABLED=0 GOOS=linux   GOARCH=arm64  go build $(LDFLAGS) -o $(DIST)/oosp_linux_arm64 . && \
+		CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oosp_windows_amd64.exe .
+	@echo "✅ dist/oosp_*"
+
+# -----------------------------------------------------------------------------
+# oos-demo — native process manager
+# -----------------------------------------------------------------------------
+
+compile-oos-demo:
+	@mkdir -p $(DIST)
+	@echo "⚙️  oos-demo — $(COMPILE_VERSION)"
+	@cd oos-demo && \
+		CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oos-demo_mac_amd64 . && \
+		CGO_ENABLED=0 GOOS=darwin GOARCH=arm64  go build $(LDFLAGS) -o $(DIST)/oos-demo_mac_arm64 .
+	@lipo -create -output $(DIST)/oos-demo_macos $(DIST)/oos-demo_mac_amd64 $(DIST)/oos-demo_mac_arm64
+	@rm $(DIST)/oos-demo_mac_amd64 $(DIST)/oos-demo_mac_arm64
+	@cd oos-demo && \
+		CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(DIST)/oos-demo_linux_amd64 . && \
+		CGO_ENABLED=0 GOOS=linux GOARCH=arm64  go build $(LDFLAGS) -o $(DIST)/oos-demo_linux_arm64 .
+	@echo "✅ dist/oos-demo_*"
+
+# -----------------------------------------------------------------------------
+# go mod tidy
+# -----------------------------------------------------------------------------
+
+tidy:
+	@cd oos-dsl    && go mod tidy
+	@cd oos-common && go mod tidy
+	@cd ooso       && go mod tidy
+	@cd oosp       && go mod tidy
+	@cd oos        && go mod tidy
+	@cd oos-demo   && go mod tidy
+	@echo "✅ go mod tidy — all modules"
+
+# -----------------------------------------------------------------------------
+# GitHub release
+# -----------------------------------------------------------------------------
+
+release:
+	$(eval VERSION := $(shell cat $(VERSION_FILE)))
+	@echo "📦 GitHub release $(VERSION)..."
+	@echo $(VERSION) > $(RELEASES_DIR)/version.txt
+	@cd $(RELEASES_DIR) && \
+		git add version.txt && \
+		git diff --cached --quiet || git commit -m "release $(VERSION)" && \
+		git push
+	@gh release create $(VERSION) \
+		$(DIST)/oos_macos \
+		$(DIST)/oos_linux_amd64 \
+		$(DIST)/ooso_macos \
+		$(DIST)/ooso_linux_amd64 \
+		$(DIST)/oosp_linux_amd64 \
+		$(DIST)/oos-demo_macos \
+		$(DIST)/oos-demo_linux_amd64 \
+		$(DIST)/oos-demo_linux_arm64 \
+		--repo onisin.com/releases \
+		--title "OOS $(VERSION)" \
+		--notes "OOS $(VERSION)"
+	@echo "✅ https://github.com/onisin.com/releases/releases/tag/$(VERSION)"
+
+# -----------------------------------------------------------------------------
+# Docker deploy
+# -----------------------------------------------------------------------------
+
+deploy: deploy-oosp
+	@echo "✅ all Docker images deployed"
+
+deploy-oosp:
+	$(eval VERSION := $(shell cat $(VERSION_FILE)))
+	@docker buildx build --no-cache \
+		--platform $(PLATFORM) \
+		--build-arg VERSION=$(VERSION) \
+		-f demo/oosp.Dockerfile \
+		-t $(IMAGE_OOSP):$(VERSION) \
+		-t $(IMAGE_OOSP):latest \
+		--push $(DIST)
+	@echo "✅ $(IMAGE_OOSP):$(VERSION)"
+
+# -----------------------------------------------------------------------------
+# Run oosp locally
+# -----------------------------------------------------------------------------
+
+run-oosp-local:
+	@OOSP_SERVER_ADDR=":9100" \
+	 OOSP_VAULT_URL="http://localhost:8200" \
+	 OOSP_VAULT_TOKEN="oos-dev-root-token" \
+	 OOSP_DEBUG="true" \
+	 $(DIST)/oosp_macos --unsecure
+
+# -----------------------------------------------------------------------------
+# Cleanup
+# -----------------------------------------------------------------------------
+
+clean:
+	@rm -rf dist
+
+help:
+	@echo ""
+	@echo "  make compile           — build all modules into dist/"
+	@echo "  make compile-oos       — build oos (Fyne desktop client)"
+	@echo "  make compile-ooso      — build ooso (importer + designer)"
+	@echo "  make compile-oosp      — build oosp (plugin server)"
+	@echo "  make compile-oosb      — build oosb (MCP bridge)"
+	@echo "  make compile-oos-demo  — build oos-demo (native process manager)"
+	@echo "  make tidy              — go mod tidy across all modules"
+	@echo "  make release           — create GitHub release"
+	@echo "  make deploy            — build + push Docker images"
+	@echo "  make clean             — remove dist/"
+	@echo ""

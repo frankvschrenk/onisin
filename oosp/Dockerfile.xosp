@@ -1,0 +1,16 @@
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates
+
+COPY oosp_linux_amd64 /app/oosp
+# Binary kommt aus oos/dist/ via docker build context
+RUN chmod +x /app/oosp
+
+LABEL org.opencontainers.image.source="https://github.com/onisin.com/oosp"
+LABEL org.opencontainers.image.url="https://ghcr.io/onisin.com/oosp"
+LABEL org.opencontainers.image.description="OOSP — OOS Plugin Server"
+LABEL org.opencontainers.image.licenses="MIT"
+
+EXPOSE 9100
+
+ENTRYPOINT ["/app/oosp"]

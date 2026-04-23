@@ -1,0 +1,28 @@
+{
+  "meta": {
+    "context": "person_detail",
+    "kind": "entity"
+  },
+  "data": {
+    "user": {
+      "firstname": "Admin",
+      "lastname": "Meier",
+      "email": "admin@onisin.ai",
+      "role": "admin",
+      "phone": "+49 89 123456",
+      "address": {
+        "street": "Musterstraße 42",
+        "city": "München"
+      }
+    }
+  },
+  "options": {
+    "role": [
+      {"value": "admin",   "label": "Administrator"},
+      {"value": "manager", "label": "Manager"},
+      {"value": "user",    "label": "Benutzer"},
+      {"value": "guest",   "label": "Gast"}
+    ],
+    "city": ["München", "Berlin", "Hamburg", "Frankfurt", "Köln"]
+  }
+}

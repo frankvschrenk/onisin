@@ -1,0 +1,53 @@
+# ── macOS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── IDE / Editor ──────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Backup-Dateien und -Verzeichnisse aus Refactorings ───────────────────
+*.bak
+*.bak/
+
+# ── Build-Output & Release-Artefakte ──────────────────────────────────────────
+/dist/
+/staging/
+/data/outputs/
+/data/assets/
+
+# ── Fremdcode mit eigenem .git (lokal geclonte Repos zum Nachschauen) ─────────
+/eino/
+
+# ── Ghost-Verzeichnisse (tauchen immer wieder auf, leer) ──────────────────────
+/backends/
+/configuration/
+
+# ── Kompilierte Go-Binaries pro Modul (kein Suffix, gleich dem Modul-Namen) ───
+/oos/oos
+/oosp/oosp
+/oos-demo/oos-demo
+/oosb/oosb
+/ooso/ooso
+/oose/oose
+/oos-dsl/oos-dsl
+/oosfs/oosfs
+
+# ── Go Test- und Coverage-Artefakte ───────────────────────────────────────────
+*.test
+*.out
+coverage.txt
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+
+# ── Environment / Secrets (falls jemals lokal eine .env landet) ───────────────
+.env
+.env.local
+*.secret
+
+/staging
+# ── Claude / Kilian Session-Notizen (zwischen Kilian und Frank, nicht Repo) ──
+.claude/

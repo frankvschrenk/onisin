@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen id="user-list" title="Benutzerliste">
+
+  <label text="Benutzer — Zeile anklicken für Details"/>
+
+  <table id="users" bind="rows" action="select">
+    <column label="Name"       field="name"/>
+    <column label="E-Mail"     field="email"/>
+    <column label="Rolle"      field="role"/>
+    <column label="Abteilung"  field="department"/>
+    <column label="Aktiv"      field="active"/>
+  </table>
+
+  <!-- Buttons rechtsbündig, mit Abstand nach oben -->
+  <box orient="horizontal" align="right" padding="top">
+    <button id="delete" label="Löschen"  action="delete" style="danger"/>
+    <button id="new"    label="Neu"      action="new"    style="add"/>
+  </box>
+
+</screen>

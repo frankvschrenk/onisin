@@ -1,0 +1,39 @@
+# demo.toml — OOS Demo configuration
+#
+# Binaries are installed to ~/.local/bin (must be in PATH).
+# Data, logs and config land in ~/.oos/
+#
+# The [llm] section below is forwarded to the oosp backend via env vars
+# (OOSP_LLM_URL, OOSP_EMBED_MODEL); the oos desktop client has its own
+# LLM URL in oos.toml, editable via Menu → Settings.
+#
+# Ollama must be started by the user before running oos-demo:
+#   ollama serve
+
+[postgresql]
+port     = 5432
+database = "onisin"
+user     = "postgres"
+password = "demo"
+
+[postgresql.app_users]
+oosp = "oos-oosp-2026!"
+ooso = "oos-ooso-2026!"
+
+[dex]
+port = 5556
+
+[[dex.users]]
+email    = "admin@oos.local"
+password = "admin"
+
+[[dex.users]]
+email    = "user@oos.local"
+password = "user"
+
+[oosp]
+port = 9100
+
+[llm]
+url         = "http://localhost:11434"
+embed_model = "granite-embedding:latest"

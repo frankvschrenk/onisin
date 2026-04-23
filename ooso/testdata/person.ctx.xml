@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  person.ctx.xml — Kontext-Datei für die Entität "Person".
+
+  Zielgruppe:  KI  — liest den AST um GraphQL Queries zu bauen
+               oosp — Zugriffssteuerung, Meta-Fetch, Mutationen
+               Synthetist — pflegt Datenmodell und Businesslogik
+
+  Bewusst NICHT enthalten (gehört in die DSL des Loomers):
+    - label="..."     → Feldbezeichnung im UI
+    - format="cur"    → Darstellungsformat
+    - widget="..."    → Widget-Wahl
+
+  Meta-Quellen:
+    Die KI fragt Stammdaten + alle Meta-Options in EINEM GraphQL-Request ab.
+    oosp baut das Envelope: { "content": {...}, "meta": {...} }
+
+  Hinweis city:
+    person.city ist varchar (Freitext). meta_cities liefert Vorschläge
+    aus der city-Tabelle — value und label sind beide der Stadtname.
+-->
+<oos>
+
+  <!-- ═══════════════════════════════════════════════════════
+       Collection: Personenliste
+  ════════════════════════════════════════════════════════════ -->
+  <context name="person_list" kind="collection" source="person" dsn="demo">
+
+    <permission role="admin"   actions="read,write,delete"/>
+    <permission role="manager" actions="read,write"/>
+    <permission role="user"    actions="read"/>
+
+    <list_fields>id, firstname, lastname, email, city, age, net_worth</list_fields>
+
+    <field name="id"        type="int"    readonly="true"/>
+    <field name="firstname" type="string" filterable="true"/>
+    <field name="lastname"  type="string" filterable="true"/>
+    <field name="age"       type="int"    filterable="true"/>
+    <field name="net_worth" type="float"/>
+    <field name="street"    type="string"/>
+    <field name="zip"       type="string"/>
+    <field name="city"      type="string" filterable="true" meta="cities"/>
+    <field name="email"     type="string" filterable="true"/>
+    <field name="phone"     type="string"/>
+
+    <meta name="cities" table="city" value="name" label="name" dsn="demo" order_by="name"/>
+
+    <navigate event="on_select" to="person_detail" bind="id -> id"/>
+    <relation name="notes" context="note_list" type="has_many" bind="id -> person_id"/>
+
+    <ai name="list_behavior">Frage bei person_list immer exakt die list_fields ab – nicht mehr, nicht weniger.</ai>
+    <ai name="navigation">Ein Klick auf eine Tabellenzeile öffnet person_detail mit der id dieser Person.</ai>
+    <ai name="format_hint">net_worth ist Währung in EUR. age in Jahren, keine Dezimalstellen.</ai>
+    <ai name="meta_hint">meta_cities liefert Stadtvorschläge. person.city ist Freitext.</ai>
+
+  </context>
+
+  <!-- ═══════════════════════════════════════════════════════
+       Entity: Personendetail
+  ════════════════════════════════════════════════════════════ -->
+  <context name="person_detail" kind="entity" source="person" dsn="demo">
+
+    <permission role="admin"   actions="read,write,delete"/>
+    <permission role="manager" actions="read,write"/>
+    <permission role="user"    actions="read"/>
+
+    <!-- Stammdaten -->
+    <field name="id"               type="int"      readonly="true"/>
+    <field name="title"            type="string"/>
+    <field name="firstname"        type="string"   filterable="true"/>
+    <field name="lastname"         type="string"   filterable="true"/>
+    <field name="age"              type="int"/>
+    <field name="net_worth"        type="float"/>
+
+    <!-- Zugehörigkeit -->
+    <field name="role"             type="string"   meta="roles"/>
+    <field name="department"       type="string"   meta="departments"/>
+    <field name="employment"       type="string"   meta="employment_types"/>
+    <field name="active"           type="bool"/>
+    <field name="profile_complete" type="float"/>
+
+    <!-- Adresse — city Freitext, country FK-Code -->
+    <field name="street"           type="string"/>
+    <field name="zip"              type="string"/>
+    <field name="city"             type="string"   meta="cities"/>
+    <field name="country"          type="string"   meta="countries"/>
+
+    <!-- Kommunikation -->
+    <field name="email"            type="string"/>
+    <field name="phone"            type="string"/>
+    <field name="mobile"           type="string"/>
+    <field name="linkedin"         type="string"/>
+
+    <!-- Einstellungen -->
+    <field name="notify_channel"   type="string"   meta="notify_channels"/>
+    <field name="notify_email"     type="bool"/>
+    <field name="notify_push"      type="bool"/>
+    <field name="notify_sms"       type="bool"/>
+    <field name="notify_weekly"    type="bool"/>
+    <field name="language"         type="string"   meta="languages"/>
+    <field name="font_size"        type="int"/>
+    <field name="notes"            type="text"/>
+
+    <!-- Systemfelder -->
+    <field name="uuid"             type="string"   readonly="true"/>
+    <field name="source"           type="string"   readonly="true"/>
+    <field name="created_at"       type="datetime" readonly="true"/>
+    <field name="updated_at"       type="datetime" readonly="true"/>
+
+    <meta name="roles"            table="role"            value="key"  label="label" dsn="demo" order_by="label"/>
+    <meta name="departments"      table="department"      value="key"  label="label" dsn="demo" order_by="label"/>
+    <meta name="employment_types" table="employment_type" value="key"  label="label" dsn="demo" order_by="label"/>
+    <meta name="cities"           table="city"            value="name" label="name"  dsn="demo" order_by="name"/>
+    <meta name="countries"        table="country"         value="code" label="name"  dsn="demo" order_by="name"/>
+    <meta name="notify_channels"  table="notify_channel"  value="key"  label="label" dsn="demo"/>
+    <meta name="languages"        table="language"        value="code" label="name"  dsn="demo" order_by="name"/>
+
+    <navigate event="on_notes" to="note_list" bind="id -> person_id"/>
+
+    <ai name="edit_hint">id, uuid, source, created_at, updated_at sind readonly — nie in einer Mutation verwenden.</ai>
+    <ai name="format_hint">net_worth ist Währung in EUR. profile_complete ist 0.0–1.0 (Prozent).</ai>
+    <ai name="bool_fields">active, notify_email, notify_push, notify_sms, notify_weekly sind boolean.</ai>
+    <ai name="city_hint">person.city ist Freitext. meta_cities liefert Vorschläge aus der Datenbank.</ai>
+    <ai name="meta_hint">Felder mit meta_ref immer mit dem entsprechenden meta_* Query im selben Request abfragen.</ai>
+
+  </context>
+
+</oos>
