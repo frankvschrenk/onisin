@@ -105,17 +105,36 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 	}
 
 	// ── Tab 2: XML ────────────────────────────────────────────────────────
-	xmlGrid := widget.NewTextGrid()
-	xmlGrid.ShowLineNumbers = true
+	//
+	// The XML tab is now editable. Paste a theme XML, hit "Apply",
+	// and the field-by-field editor on the other tab plus the preview
+	// window update to match. Also works the other way round: edits
+	// in the editor tab regenerate the XML here on every refreshAll.
+	xmlEditor := widget.NewMultiLineEntry()
+	xmlEditor.Wrapping = fyne.TextWrapOff
+	xmlEditor.SetPlaceHolder("<oos-theme>...</oos-theme>")
 
-	// refreshAll: XML + App-Theme + Preview
-	// Sicher: fyne.CurrentApp() nur aufrufen wenn App bereits läuft.
+	// xmlDirty guards refreshAll from stomping the user's unsaved
+	// edits in the XML tab while they are still typing. Flipped on
+	// every OnChanged, cleared when the editor writes its own text.
+	var xmlDirty bool
+	xmlEditor.OnChanged = func(string) { xmlDirty = true }
+
+	setXMLText := func(xml string) {
+		xmlEditor.SetText(xml)
+		xmlDirty = false
+	}
+
+	// refreshAll: regenerate XML from xtheme, re-apply theme, redraw
+	// preview. Safe to call before the Fyne app has fully started —
+	// the CurrentApp guard falls through silently.
 	refreshAll := func() {
-		xml, err := xtheme.ToXML()
-		if err != nil {
-			xmlGrid.SetText("Fehler: " + err.Error())
-		} else {
-			xmlGrid.SetText(xml)
+		if !xmlDirty {
+			if xml, err := xtheme.ToXML(); err == nil {
+				setXMLText(xml)
+			} else {
+				setXMLText("Fehler: " + err.Error())
+			}
 		}
 		if a := fyne.CurrentApp(); a != nil {
 			a.Settings().SetTheme(oostheme.NewGlobalFyneTheme(xtheme))
@@ -123,9 +142,8 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 		refreshPreview()
 	}
 
-	// Initialer XML-Stand ohne App-Zugriff
 	if xml, err := xtheme.ToXML(); err == nil {
-		xmlGrid.SetText(xml)
+		setXMLText(xml)
 	}
 
 	// ── Eigenschafts-Editor ───────────────────────────────────────────────
@@ -353,10 +371,40 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 
 	bottomBar := container.NewBorder(nil, nil, nil, statusLabel, toolbar)
 
+	// XML-Tab toolbar: Apply parses the editor content and pushes it
+	// back into xtheme, then refreshes the field editor, preview and
+	// live-applied Fyne theme. Revert throws away unsaved edits and
+	// regenerates the XML from the current xtheme.
+	xmlApplyBtn := widget.NewButtonWithIcon("Apply", theme.ConfirmIcon(), func() {
+		parsed, err := oostheme.ParseXML(xmlEditor.Text)
+		if err != nil {
+			statusLabel.SetText("XML: " + err.Error())
+			return
+		}
+		xtheme = parsed
+		xmlDirty = false
+		buildEditor(xtheme.ForWidget(kinds[0]))
+		widgetList.Select(0)
+		variantRadio.SetSelected(xtheme.Variant)
+		refreshAll()
+		statusLabel.SetText("XML übernommen")
+	})
+	xmlApplyBtn.Importance = widget.HighImportance
+
+	xmlRevertBtn := widget.NewButtonWithIcon("Revert", theme.ContentUndoIcon(), func() {
+		if xml, err := xtheme.ToXML(); err == nil {
+			setXMLText(xml)
+			statusLabel.SetText("")
+		}
+	})
+
+	xmlToolbar := container.NewHBox(xmlApplyBtn, xmlRevertBtn)
+	xmlTab := container.NewBorder(xmlToolbar, nil, nil, nil, xmlEditor)
+
 	// ── Tabs ──────────────────────────────────────────────────────────────
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Editor", editorSplit),
-		container.NewTabItem("XML", container.NewVScroll(xmlGrid)),
+		container.NewTabItem("XML", xmlTab),
 	)
 	tabs.OnSelected = func(tab *container.TabItem) {
 		if tab.Text == "XML" {

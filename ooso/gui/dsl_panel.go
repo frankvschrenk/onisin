@@ -1,213 +1,227 @@
 package gui
 
-// dsl_panel.go — Panel zum Importieren und Previewen von DSL-Dateien.
+// dsl_panel.go — DSL editor working directly against oos.dsl.
 //
 // Layout (HSplit):
-//   Links:
-//     [ Verzeichnis wählen ]  [ Importieren ]
-//     [ Dateiliste mit Checkboxen ]
-//     [ Log ]
-//   Rechts:
-//     [ Datei wählen ]  [ Preview-Button ]
-//     [ DSL Preview  ]
+//   left   ─ list of screen ids + toolbar (new / save / delete / refresh)
+//   middle ─ multiline XML editor
+//   right  ─ live preview rendered from the editor's current text
 //
-// Der Benutzer wählt ein Verzeichnis mit *.dsl.xml Dateien.
-// Einzelne oder alle können importiert werden.
-// Per Klick auf eine Datei öffnet sich die Preview rechts.
+// The file-system import flow was dropped: DSL screens are edited in
+// place in oos.dsl. Preview re-renders on every save, so the round
+// trip "edit XML → save → see it" stays inside the panel.
 
 import (
+	"bytes"
 	"fmt"
-	"os"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
 	"onisin.com/oos-dsl/dsl"
-	"onisin.com/oos-common/importer"
 )
 
-// dslPanelState hält den Zustand des DSL-Panels.
+// dslPanelState holds the editor state for the DSL panel.
 type dslPanelState struct {
 	conn    *Connection
-	files   []*importer.DSLFile
-	checks  []bool
-	dslDir  string
+	ids     []string
+	current string
+	dirty   bool
 }
 
-// buildDSLPanel baut das DSL-Import + Preview Panel.
+// buildDSLPanel builds the DSL editor + preview panel.
 func buildDSLPanel(conn *Connection) fyne.CanvasObject {
 	state := &dslPanelState{conn: conn}
 
-	// ── Log ───────────────────────────────────────────────────────────────
-	logView := widget.NewMultiLineEntry()
-	logView.Wrapping = fyne.TextWrapWord
-	logView.Disable()
+	// ── Editor ────────────────────────────────────────────────────────────
+	editor := widget.NewMultiLineEntry()
+	editor.Wrapping = fyne.TextWrapOff
+	editor.SetPlaceHolder("— keinen Screen ausgewählt —")
+	editor.OnChanged = func(string) { state.dirty = true }
 
-	appendLog := func(msg string) {
-		cur := logView.Text
-		if cur != "" {
-			cur += "\n"
-		}
-		logView.SetText(cur + msg)
-	}
+	statusLabel := widget.NewLabel("")
 
-	// ── Preview-Bereich (rechts) ──────────────────────────────────────────
+	// ── Preview ───────────────────────────────────────────────────────────
 	previewContainer := container.NewStack(
-		widget.NewLabel("← Datei auswählen für Preview"),
+		widget.NewLabel("— Preview erscheint nach Speichern —"),
 	)
 
-	showPreview := func(f *importer.DSLFile) {
-		state := dsl.NewState()
-		builder := dsl.NewBuilder(state, f.ScreenID, nil)
-		screen := builder.Build(f.Root)
+	renderPreview := func(xml string) {
+		root, err := dsl.Parse(bytes.NewReader([]byte(xml)))
+		if err != nil {
+			previewContainer.Objects = []fyne.CanvasObject{
+				widget.NewLabel("Parse-Fehler: " + err.Error()),
+			}
+			previewContainer.Refresh()
+			return
+		}
+		st := dsl.NewState()
+		builder := dsl.NewBuilder(st, state.current, nil)
+		screen := builder.Build(root)
 		previewContainer.Objects = []fyne.CanvasObject{
 			container.NewVScroll(screen),
 		}
 		previewContainer.Refresh()
 	}
 
-	// ── Dateiliste (links) ────────────────────────────────────────────────
-	fileList := widget.NewList(
-		func() int { return len(state.files) },
-		func() fyne.CanvasObject {
-			return container.NewHBox(
-				widget.NewCheck("", nil),
-				widget.NewLabel(""),
-			)
-		},
+	// ── Left pane: id list ────────────────────────────────────────────────
+	idList := widget.NewList(
+		func() int { return len(state.ids) },
+		func() fyne.CanvasObject { return widget.NewLabel("") },
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			row := obj.(*fyne.Container)
-			check := row.Objects[0].(*widget.Check)
-			label := row.Objects[1].(*widget.Label)
-			if id >= len(state.files) {
+			if id >= len(state.ids) {
 				return
 			}
-			f := state.files[id]
-			label.SetText(fmt.Sprintf("%s  [%s]", f.Filename, f.ScreenID))
-			check.SetChecked(state.checks[id])
-			check.OnChanged = func(checked bool) {
-				state.checks[id] = checked
-			}
+			obj.(*widget.Label).SetText(state.ids[id])
 		},
 	)
 
-	fileList.OnSelected = func(id widget.ListItemID) {
-		if id < len(state.files) {
-			showPreview(state.files[id])
-		}
-	}
-
-	// ── Verzeichnis wählen ────────────────────────────────────────────────
-	dirLabel := widget.NewLabel("kein Verzeichnis gewählt")
-
-	chooseBtn := widget.NewButtonWithIcon("Verzeichnis wählen…", theme.FolderOpenIcon(), func() {
-		w := fyne.CurrentApp().Driver().AllWindows()[0]
-		dialog.ShowFolderOpen(func(u fyne.ListableURI, err error) {
-			if err != nil || u == nil {
-				return
-			}
-			dir := u.Path()
-			files, err := importer.ParseDSLDir(dir)
-			if err != nil {
-				appendLog("✗ " + err.Error())
-				return
-			}
-			state.dslDir = dir
-			state.files = files
-			state.checks = make([]bool, len(files))
-			for i := range state.checks {
-				state.checks[i] = true
-			}
-			dirLabel.SetText(dir)
-			fileList.Refresh()
-			appendLog(fmt.Sprintf("✓ %d DSL-Dateien geladen", len(files)))
-		}, w)
-	})
-
-	// ── Einzelne Datei wählen ─────────────────────────────────────────────
-	addFileBtn := widget.NewButtonWithIcon("Datei hinzufügen…", theme.FileIcon(), func() {
-		w := fyne.CurrentApp().Driver().AllWindows()[0]
-		dialog.ShowFileOpen(func(f fyne.URIReadCloser, err error) {
-			if err != nil || f == nil {
-				return
-			}
-			defer f.Close()
-			parsed, err := importer.ParseDSLFile(f.URI().Path())
-			if err != nil {
-				appendLog("✗ " + err.Error())
-				return
-			}
-			state.files = append(state.files, parsed)
-			state.checks = append(state.checks, true)
-			fileList.Refresh()
-			appendLog(fmt.Sprintf("✓ %s geladen [%s]", parsed.Filename, parsed.ScreenID))
-		}, w)
-	})
-
-	// ── Alle / Keine ──────────────────────────────────────────────────────
-	selectAllBtn := widget.NewButtonWithIcon("Alle", theme.CheckButtonCheckedIcon(), func() {
-		for i := range state.checks {
-			state.checks[i] = true
-		}
-		fileList.Refresh()
-	})
-
-	selectNoneBtn := widget.NewButtonWithIcon("Keine", theme.CheckButtonIcon(), func() {
-		for i := range state.checks {
-			state.checks[i] = false
-		}
-		fileList.Refresh()
-	})
-
-	// ── Import ────────────────────────────────────────────────────────────
-	importBtn := widget.NewButtonWithIcon("Importieren", theme.UploadIcon(), func() {
-		if !conn.IsConnected() {
-			appendLog("✗ Nicht verbunden")
+	loadInto := func(id string) {
+		xml, found, err := state.conn.Importer().LoadDSLRaw(id)
+		if err != nil {
+			statusLabel.SetText("Fehler: " + err.Error())
 			return
 		}
-		imp := conn.Importer()
-		count := 0
-		for i, f := range state.files {
-			if !state.checks[i] {
-				continue
-			}
-			// Frisch von Disk lesen damit wir das aktuelle XML haben
-			raw, err := os.ReadFile(f.Filename)
-			if err != nil {
-				// Datei war evtl. nur im Speicher (ParseDSLFile via Pfad)
-				raw = []byte(f.RawXML)
-			}
-			if err := imp.ImportDSL(f.ScreenID, string(raw)); err != nil {
-				appendLog(fmt.Sprintf("✗ %s: %v", f.Filename, err))
-				continue
-			}
-			appendLog(fmt.Sprintf("✓ %s → oos.dsl[%s]", f.Filename, f.ScreenID))
-			count++
+		if !found {
+			statusLabel.SetText(fmt.Sprintf("oos.dsl[%s] nicht gefunden", id))
+			return
 		}
-		appendLog(fmt.Sprintf("─── %d DSL-Dateien importiert", count))
+		state.current = id
+		editor.SetText(xml)
+		state.dirty = false
+		statusLabel.SetText(fmt.Sprintf("geladen: oos.dsl[%s]", id))
+		renderPreview(xml)
+	}
+
+	idList.OnSelected = func(id widget.ListItemID) {
+		if id >= len(state.ids) {
+			return
+		}
+		loadInto(state.ids[id])
+	}
+
+	refreshList := func() {
+		if !conn.IsConnected() {
+			state.ids = nil
+			idList.Refresh()
+			statusLabel.SetText("nicht verbunden")
+			return
+		}
+		ids, err := conn.Importer().GetDSLIDs()
+		if err != nil {
+			statusLabel.SetText("Liste: " + err.Error())
+			return
+		}
+		state.ids = ids
+		idList.Refresh()
+		statusLabel.SetText(fmt.Sprintf("%d Screens", len(ids)))
+	}
+
+	// ── Toolbar actions ───────────────────────────────────────────────────
+	refreshBtn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
+		refreshList()
 	})
-	importBtn.Importance = widget.HighImportance
+	refreshBtn.Importance = widget.LowImportance
 
-	// ── Linkes Panel zusammenbauen ────────────────────────────────────────
-	toolbar := container.NewHBox(chooseBtn, addFileBtn, selectAllBtn, selectNoneBtn, importBtn)
-	leftPanel := container.NewBorder(
-		container.NewVBox(toolbar, dirLabel),
-		container.NewVScroll(logView),
-		nil, nil,
-		fileList,
-	)
+	newBtn := widget.NewButtonWithIcon("Neu", theme.ContentAddIcon(), func() {
+		if !conn.IsConnected() {
+			statusLabel.SetText("nicht verbunden")
+			return
+		}
+		w := fyne.CurrentApp().Driver().AllWindows()[0]
+		idEntry := widget.NewEntry()
+		idEntry.SetPlaceHolder("z.B. customer_detail")
+		dialog.ShowForm("Neuer DSL-Screen", "Anlegen", "Abbrechen",
+			[]*widget.FormItem{{Text: "Screen-ID", Widget: idEntry}},
+			func(ok bool) {
+				if !ok || idEntry.Text == "" {
+					return
+				}
+				id := idEntry.Text
+				skeleton := fmt.Sprintf(
+					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<screen id=\"%s\">\n  <!-- layout, widgets, bindings here -->\n</screen>\n",
+					id,
+				)
+				if err := conn.Importer().ImportDSL(id, skeleton); err != nil {
+					statusLabel.SetText("Anlegen: " + err.Error())
+					return
+				}
+				refreshList()
+				loadInto(id)
+			}, w)
+	})
 
-	// ── Rechtes Panel (Preview) ───────────────────────────────────────────
+	saveBtn := widget.NewButtonWithIcon("Speichern", theme.DocumentSaveIcon(), func() {
+		if state.current == "" {
+			statusLabel.SetText("nichts geladen")
+			return
+		}
+		if err := conn.Importer().ImportDSL(state.current, editor.Text); err != nil {
+			statusLabel.SetText("Speichern: " + err.Error())
+			return
+		}
+		state.dirty = false
+		statusLabel.SetText(fmt.Sprintf("gespeichert: oos.dsl[%s]", state.current))
+		renderPreview(editor.Text)
+	})
+	saveBtn.Importance = widget.HighImportance
+
+	deleteBtn := widget.NewButtonWithIcon("Löschen", theme.DeleteIcon(), func() {
+		if state.current == "" {
+			statusLabel.SetText("nichts geladen")
+			return
+		}
+		w := fyne.CurrentApp().Driver().AllWindows()[0]
+		dialog.ShowConfirm(
+			"DSL löschen",
+			fmt.Sprintf("Screen oos.dsl[%s] wirklich löschen?", state.current),
+			func(ok bool) {
+				if !ok {
+					return
+				}
+				if err := conn.Importer().DeleteDSL(state.current); err != nil {
+					statusLabel.SetText("Löschen: " + err.Error())
+					return
+				}
+				state.current = ""
+				editor.SetText("")
+				previewContainer.Objects = []fyne.CanvasObject{
+					widget.NewLabel("— kein Screen ausgewählt —"),
+				}
+				previewContainer.Refresh()
+				refreshList()
+			}, w)
+	})
+
+	previewBtn := widget.NewButtonWithIcon("Preview", theme.VisibilityIcon(), func() {
+		renderPreview(editor.Text)
+	})
+
+	toolbar := container.NewHBox(newBtn, saveBtn, deleteBtn, previewBtn)
+
+	// ── Layout ────────────────────────────────────────────────────────────
+	leftHeader := container.NewBorder(nil, nil, widget.NewLabel("DSL"), refreshBtn)
+	leftPanel := container.NewBorder(leftHeader, nil, nil, nil, idList)
+
+	middlePanel := container.NewBorder(toolbar, statusLabel, nil, nil, editor)
+
 	rightPanel := container.NewBorder(
-		widget.NewLabel("DSL Preview"),
+		widget.NewLabel("Preview"),
 		nil, nil, nil,
 		previewContainer,
 	)
 
-	// ── Horizontaler Split ────────────────────────────────────────────────
-	split := container.NewHSplit(leftPanel, rightPanel)
-	split.SetOffset(0.4)
-	return split
+	// Two-level split: list | (editor | preview)
+	editPreviewSplit := container.NewHSplit(middlePanel, rightPanel)
+	editPreviewSplit.SetOffset(0.5)
+
+	outerSplit := container.NewHSplit(leftPanel, editPreviewSplit)
+	outerSplit.SetOffset(0.2)
+
+	refreshList()
+
+	return outerSplit
 }

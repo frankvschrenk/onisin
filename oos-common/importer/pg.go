@@ -136,6 +136,52 @@ func (imp *PGImporter) LoadThemeXML(variant string) (string, error) {
 	return xml.String, nil
 }
 
+// LoadCTXRaw returns the raw XML for a CTX row by id. The second
+// return is false when the row does not exist.
+func (imp *PGImporter) LoadCTXRaw(id string) (string, bool, error) {
+	var xml string
+	err := imp.db.QueryRow(`SELECT xml FROM oos.ctx WHERE id = $1`, id).Scan(&xml)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("oos.ctx select %q: %w", id, err)
+	}
+	return xml, true, nil
+}
+
+// DeleteCTX removes a CTX row by id. No-op if the row is missing.
+func (imp *PGImporter) DeleteCTX(id string) error {
+	_, err := imp.db.Exec(`DELETE FROM oos.ctx WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("oos.ctx delete %q: %w", id, err)
+	}
+	return nil
+}
+
+// LoadDSLRaw returns the raw XML for a DSL row by screen id. The
+// second return is false when the row does not exist.
+func (imp *PGImporter) LoadDSLRaw(id string) (string, bool, error) {
+	var xml string
+	err := imp.db.QueryRow(`SELECT xml FROM oos.dsl WHERE id = $1`, id).Scan(&xml)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("oos.dsl select %q: %w", id, err)
+	}
+	return xml, true, nil
+}
+
+// DeleteDSL removes a DSL row by screen id. No-op if the row is missing.
+func (imp *PGImporter) DeleteDSL(id string) error {
+	_, err := imp.db.Exec(`DELETE FROM oos.dsl WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("oos.dsl delete %q: %w", id, err)
+	}
+	return nil
+}
+
 // GetDSLIDs gibt alle bekannten DSL Screen-IDs zurück.
 func (imp *PGImporter) GetDSLIDs() ([]string, error) {
 	rows, err := imp.db.Query(`SELECT id FROM oos.dsl ORDER BY id`)

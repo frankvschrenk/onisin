@@ -1,192 +1,183 @@
 package gui
 
-// ctx_panel.go — Panel zum Importieren von CTX-Dateien.
+// ctx_panel.go — CTX editor working directly against oos.ctx.
 //
-// Layout:
-//   [ groups.xml wählen  ]  [ Import-Button ]
-//   [ Gruppen-Liste      ]  ← checkbare Liste
-//   [ Log-Ausgabe        ]  ← Ergebnis + Fehler
+// Layout (HSplit):
+//   left  ─ list of ctx ids, refreshed from the database on demand
+//   right ─ multiline XML editor + save / delete / new toolbar
 //
-// Der Benutzer wählt eine groups.xml Datei.
-// Die Gruppen darin werden aufgelistet.
-// Einzelne Gruppen oder alle können importiert werden.
+// The file-system import flow was dropped in favour of direct
+// database editing: all OOS installs keep their CTX in oos.ctx,
+// and asking users to hand-edit files and hit "Import" was a
+// relic of the batch-seed workflow that oos-demo already covers
+// through its own seed pipeline.
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"onisin.com/oos-common/importer"
 )
 
-// ctxPanelState hält den Zustand des CTX-Panels.
+// ctxPanelState holds the editor state for the CTX panel.
 type ctxPanelState struct {
-	conn       *Connection
-	groupsPath string
-	groups     []importer.Group
-	checks     []bool // welche Gruppen ausgewählt sind
+	conn    *Connection
+	ids     []string
+	current string // currently selected id, empty when none
+	dirty   bool   // editor has unsaved changes
 }
 
-// buildCTXPanel baut das CTX-Import Panel.
+// buildCTXPanel builds the CTX editor panel.
 func buildCTXPanel(conn *Connection) fyne.CanvasObject {
 	state := &ctxPanelState{conn: conn}
 
-	// Pfad-Anzeige
-	pathLabel := widget.NewLabel("keine groups.xml gewählt")
-	pathLabel.Wrapping = fyne.TextTruncate
+	// ── Editor ────────────────────────────────────────────────────────────
+	editor := widget.NewMultiLineEntry()
+	editor.Wrapping = fyne.TextWrapOff
+	editor.SetPlaceHolder("— keine CTX ausgewählt —")
+	editor.OnChanged = func(string) { state.dirty = true }
 
-	// Gruppen-Liste
-	groupList := widget.NewList(
-		func() int { return len(state.groups) },
-		func() fyne.CanvasObject {
-			return container.NewHBox(widget.NewCheck("", nil), widget.NewLabel(""))
-		},
+	statusLabel := widget.NewLabel("")
+
+	// ── Left pane: id list ────────────────────────────────────────────────
+	idList := widget.NewList(
+		func() int { return len(state.ids) },
+		func() fyne.CanvasObject { return widget.NewLabel("") },
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
-			row := obj.(*fyne.Container)
-			check := row.Objects[0].(*widget.Check)
-			label := row.Objects[1].(*widget.Label)
-			if id >= len(state.groups) {
+			if id >= len(state.ids) {
 				return
 			}
-			g := state.groups[id]
-			label.SetText(fmt.Sprintf("%s  [%s]  — %d Dateien",
-				g.Name, g.Role, len(g.Includes)))
-			check.SetChecked(state.checks[id])
-			check.OnChanged = func(checked bool) {
-				state.checks[id] = checked
-			}
+			obj.(*widget.Label).SetText(state.ids[id])
 		},
 	)
 
-	// Log-Ausgabe
-	logView := widget.NewMultiLineEntry()
-	logView.Wrapping = fyne.TextWrapWord
-	logView.Disable()
-
-	appendLog := func(msg string) {
-		current := logView.Text
-		if current != "" {
-			current += "\n"
+	loadInto := func(id string) {
+		xml, found, err := state.conn.Importer().LoadCTXRaw(id)
+		if err != nil {
+			statusLabel.SetText("Fehler: " + err.Error())
+			return
 		}
-		logView.SetText(current + msg)
+		if !found {
+			statusLabel.SetText(fmt.Sprintf("oos.ctx[%s] nicht gefunden", id))
+			return
+		}
+		state.current = id
+		editor.SetText(xml)
+		state.dirty = false
+		statusLabel.SetText(fmt.Sprintf("geladen: oos.ctx[%s]", id))
 	}
 
-	// groups.xml Datei wählen
-	chooseBtn := widget.NewButtonWithIcon("groups.xml wählen…", theme.FolderOpenIcon(), func() {
-		w := fyne.CurrentApp().Driver().AllWindows()[0]
-		dialog.ShowFileOpen(func(f fyne.URIReadCloser, err error) {
-			if err != nil || f == nil {
-				return
-			}
-			defer f.Close()
-			path := f.URI().Path()
-			groups, err := importer.ParseGroupsFile(path)
-			if err != nil {
-				appendLog("Fehler: " + err.Error())
-				return
-			}
-			state.groupsPath = path
-			state.groups = groups
-			state.checks = make([]bool, len(groups))
-			// Alle vorauswählen
-			for i := range state.checks {
-				state.checks[i] = true
-			}
-			pathLabel.SetText(path)
-			groupList.Refresh()
-			appendLog(fmt.Sprintf("✓ %d Gruppen geladen aus %s",
-				len(groups), filepath.Base(path)))
-		}, w)
-	})
-
-	// Alle auswählen / abwählen
-	selectAllBtn := widget.NewButtonWithIcon("Alle", theme.CheckButtonCheckedIcon(), func() {
-		for i := range state.checks {
-			state.checks[i] = true
+	idList.OnSelected = func(id widget.ListItemID) {
+		if id >= len(state.ids) {
+			return
 		}
-		groupList.Refresh()
-	})
+		loadInto(state.ids[id])
+	}
 
-	selectNoneBtn := widget.NewButtonWithIcon("Keine", theme.CheckButtonIcon(), func() {
-		for i := range state.checks {
-			state.checks[i] = false
-		}
-		groupList.Refresh()
-	})
-
-	// Import ausführen
-	importBtn := widget.NewButtonWithIcon("Importieren", theme.UploadIcon(), func() {
+	refreshList := func() {
 		if !conn.IsConnected() {
-			appendLog("✗ Nicht verbunden — bitte zuerst Verbinden")
+			state.ids = nil
+			idList.Refresh()
+			statusLabel.SetText("nicht verbunden")
 			return
 		}
-		if state.groupsPath == "" {
-			appendLog("✗ Keine groups.xml gewählt")
-			return
-		}
-
-		imp := conn.Importer()
-		ctxDir := filepath.Dir(state.groupsPath)
-
-		// groups.xml selbst importieren
-		groupsXML, err := os.ReadFile(state.groupsPath)
+		ids, err := conn.Importer().GetCTXIDs()
 		if err != nil {
-			appendLog("✗ groups.xml lesen: " + err.Error())
+			statusLabel.SetText("Liste: " + err.Error())
 			return
 		}
-		if err := imp.ImportGroupsFile(string(groupsXML)); err != nil {
-			appendLog("✗ groups.xml: " + err.Error())
-			return
-		}
-
-		// Ausgewählte Gruppen importieren
-		imported := 0
-		for i, g := range state.groups {
-			if !state.checks[i] {
-				continue
-			}
-			files, err := readGroupFiles(g, ctxDir)
-			if err != nil {
-				appendLog(fmt.Sprintf("✗ Gruppe %s: %v", g.Name, err))
-				continue
-			}
-			if err := imp.ImportGroup(g.Name, files); err != nil {
-				appendLog(fmt.Sprintf("✗ Gruppe %s: %v", g.Name, err))
-				continue
-			}
-			appendLog(fmt.Sprintf("✓ Gruppe %s (%d Dateien)", g.Name, len(files)))
-			imported++
-		}
-		appendLog(fmt.Sprintf("─── %d Gruppen importiert", imported))
-	})
-	importBtn.Importance = widget.HighImportance
-
-	// Layout zusammenbauen
-	toolbar := container.NewHBox(chooseBtn, selectAllBtn, selectNoneBtn, importBtn)
-	header := container.NewVBox(toolbar, pathLabel)
-
-	return container.NewBorder(
-		header,
-		container.NewVScroll(logView),
-		nil, nil,
-		groupList,
-	)
-}
-
-// readGroupFiles liest alle CTX-Dateien einer Gruppe.
-func readGroupFiles(g importer.Group, ctxDir string) (map[string]string, error) {
-	files := make(map[string]string)
-	for _, inc := range g.Includes {
-		data, err := os.ReadFile(filepath.Join(ctxDir, inc))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", inc, err)
-		}
-		files[inc] = string(data)
+		state.ids = ids
+		idList.Refresh()
+		statusLabel.SetText(fmt.Sprintf("%d Einträge", len(ids)))
 	}
-	return files, nil
+
+	// ── Toolbar actions ───────────────────────────────────────────────────
+	refreshBtn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
+		refreshList()
+	})
+	refreshBtn.Importance = widget.LowImportance
+
+	newBtn := widget.NewButtonWithIcon("Neu", theme.ContentAddIcon(), func() {
+		if !conn.IsConnected() {
+			statusLabel.SetText("nicht verbunden")
+			return
+		}
+		w := fyne.CurrentApp().Driver().AllWindows()[0]
+		idEntry := widget.NewEntry()
+		idEntry.SetPlaceHolder("z.B. customer")
+		dialog.ShowForm("Neue CTX", "Anlegen", "Abbrechen",
+			[]*widget.FormItem{{Text: "ID", Widget: idEntry}},
+			func(ok bool) {
+				if !ok || idEntry.Text == "" {
+					return
+				}
+				id := idEntry.Text
+				skeleton := fmt.Sprintf(
+					"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<oos>\n  <context name=\"%s\" kind=\"entity\">\n    <!-- fields, relations, permissions here -->\n  </context>\n</oos>\n",
+					id,
+				)
+				if err := conn.Importer().ImportCTXFile(id, skeleton); err != nil {
+					statusLabel.SetText("Anlegen: " + err.Error())
+					return
+				}
+				refreshList()
+				loadInto(id)
+			}, w)
+	})
+
+	saveBtn := widget.NewButtonWithIcon("Speichern", theme.DocumentSaveIcon(), func() {
+		if state.current == "" {
+			statusLabel.SetText("nichts geladen")
+			return
+		}
+		if err := conn.Importer().ImportCTXFile(state.current, editor.Text); err != nil {
+			statusLabel.SetText("Speichern: " + err.Error())
+			return
+		}
+		state.dirty = false
+		statusLabel.SetText(fmt.Sprintf("gespeichert: oos.ctx[%s]", state.current))
+	})
+	saveBtn.Importance = widget.HighImportance
+
+	deleteBtn := widget.NewButtonWithIcon("Löschen", theme.DeleteIcon(), func() {
+		if state.current == "" {
+			statusLabel.SetText("nichts geladen")
+			return
+		}
+		w := fyne.CurrentApp().Driver().AllWindows()[0]
+		dialog.ShowConfirm(
+			"CTX löschen",
+			fmt.Sprintf("Eintrag oos.ctx[%s] wirklich löschen?", state.current),
+			func(ok bool) {
+				if !ok {
+					return
+				}
+				if err := conn.Importer().DeleteCTX(state.current); err != nil {
+					statusLabel.SetText("Löschen: " + err.Error())
+					return
+				}
+				state.current = ""
+				editor.SetText("")
+				refreshList()
+			}, w)
+	})
+
+	toolbar := container.NewHBox(newBtn, saveBtn, deleteBtn)
+
+	// ── Layout ────────────────────────────────────────────────────────────
+	leftHeader := container.NewBorder(nil, nil, widget.NewLabel("CTX"), refreshBtn)
+	leftPanel := container.NewBorder(leftHeader, nil, nil, nil, idList)
+
+	rightPanel := container.NewBorder(toolbar, statusLabel, nil, nil, editor)
+
+	split := container.NewHSplit(leftPanel, rightPanel)
+	split.SetOffset(0.25)
+
+	// First load if already connected at build time.
+	refreshList()
+
+	return split
 }
