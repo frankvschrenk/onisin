@@ -115,16 +115,30 @@ const (
 	paperHeader = "#eceae1"
 
 	// Slate — dark variant backgrounds.
-	slateBg     = "#13151a"
-	slateSoft   = "#1a1d23"
-	slateCard   = "#1e2128"
-	slateRule   = "#2c3039"
-	slateHeader = "#252932"
+	//
+	// Four visible layers with enough contrast between them that the
+	// shell, the cards and the surfaces on top of cards all read as
+	// distinct without the user squinting. Warmer than pure zinc so
+	// the look stays consistent with the warm paper of the light
+	// variant (same hue family, just inverted brightness).
+	//
+	//   bg      shell background, dialogs
+	//   soft    toolbars, sidebars, section headers
+	//   card    forms, tables, lists
+	//   elevated inputs sitting on top of a card (entries, chips)
+	//   header  table header band, slightly brighter than card
+	//   rule    dividers and input borders
+	slateBg       = "#1b1d22"
+	slateSoft     = "#22252b"
+	slateCard     = "#282c33"
+	slateElevated = "#30353d"
+	slateHeader   = "#323741"
+	slateRule     = "#3a3f4a"
 
 	// Inverted ink — readable on slate.
 	slateInk      = "#e5e7eb"
-	slateInkSoft  = "#cbd5e1"
-	slateInkFaint = "#94a3b8"
+	slateInkSoft  = "#b8bfcc"
+	slateInkFaint = "#8892a0"
 )
 
 // DefaultTheme returns the built-in theme for the given variant
@@ -186,9 +200,9 @@ func defaultDarkTheme() *OOSTheme {
 	}
 	add := func(w WidgetTheme) { t.Widgets = append(t.Widgets, w) }
 
-	add(WidgetTheme{Kind: KindButton, Background: slateCard, Foreground: "#ffffff", Primary: paletteBrandSoft, Border: paletteBrandSoft, Radius: radius})
-	add(WidgetTheme{Kind: KindEntry, Background: slateCard, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft, Radius: radius})
-	add(WidgetTheme{Kind: KindTextArea, Background: slateCard, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft, Radius: radius})
+	add(WidgetTheme{Kind: KindButton, Background: slateElevated, Foreground: "#ffffff", Primary: paletteBrandSoft, Border: paletteBrandSoft, Radius: radius})
+	add(WidgetTheme{Kind: KindEntry, Background: slateElevated, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft, Radius: radius})
+	add(WidgetTheme{Kind: KindTextArea, Background: slateElevated, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft, Radius: radius})
 	add(WidgetTheme{Kind: KindLabel, Foreground: slateInk})
 	add(WidgetTheme{Kind: KindCard, Background: slateCard, Foreground: slateInk, Border: slateRule, Radius: radius})
 	add(WidgetTheme{Kind: KindSection, Background: slateSoft, Foreground: slateInkSoft, Border: slateRule})
@@ -198,7 +212,7 @@ func defaultDarkTheme() *OOSTheme {
 	add(WidgetTheme{Kind: KindToolbar, Background: slateSoft, Foreground: slateInkSoft, Border: slateRule})
 	add(WidgetTheme{Kind: KindCheck, Foreground: slateInk, Primary: paletteBrandSoft})
 	add(WidgetTheme{Kind: KindRadio, Foreground: slateInk, Primary: paletteBrandSoft})
-	add(WidgetTheme{Kind: KindChoices, Background: slateCard, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft, Radius: radius})
+	add(WidgetTheme{Kind: KindChoices, Background: slateElevated, Foreground: slateInk, Border: slateRule, Primary: paletteBrandSoft, Radius: radius})
 	add(WidgetTheme{Kind: KindSlider, Foreground: slateInkFaint, Primary: paletteBrandSoft})
 	add(WidgetTheme{Kind: KindProgress, Foreground: slateRule, Primary: paletteAccent})
 

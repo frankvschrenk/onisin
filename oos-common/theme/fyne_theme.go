@@ -204,10 +204,19 @@ func (t *WidgetFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) c
 			return fg
 		}
 	case fyneTheme.ColorNamePrimary,
-		fyneTheme.ColorNameFocus,
-		fyneTheme.ColorNameSelection:
+		fyneTheme.ColorNameFocus:
 		if primary != color.Transparent {
 			return primary
+		}
+	case fyneTheme.ColorNameSelection:
+		// Match the global convention: full-opacity primary would
+		// drown the text under the selected row; 30% alpha keeps
+		// the ink legible.
+		if primary != color.Transparent {
+			if nrgba, ok := primary.(color.NRGBA); ok {
+				nrgba.A = 0x4d
+				return nrgba
+			}
 		}
 	case fyneTheme.ColorNameInputBorder,
 		fyneTheme.ColorNameSeparator:
