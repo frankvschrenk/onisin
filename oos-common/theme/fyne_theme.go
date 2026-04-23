@@ -45,8 +45,76 @@ func (t *GlobalFyneTheme) variant() fyne.ThemeVariant {
 	return fyneTheme.VariantDark
 }
 
+// Color resolves a Fyne colour slot against the OOS theme.
+//
+// The OOS theme has no dedicated "global" colour block — globals are
+// lifted from the widgets whose role naturally defines them. The
+// mapping is conservative: only slots that really are app-wide
+// (background, foreground, primary, separator, overlay) are overridden;
+// widget-local colours (input backgrounds, button faces, table headers)
+// are still applied per-widget via WidgetFyneTheme + NewThemeOverride.
+//
+// Any slot that the theme does not cover falls through to the Fyne
+// default for the selected variant, so unstyled parts of the app keep
+// a sensible look.
 func (t *GlobalFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color {
-	return t.base.Color(name, t.variant())
+	variant := t.variant()
+
+	pick := func(hex string) color.Color {
+		c := ParseHex(hex)
+		if c == color.Transparent {
+			return t.base.Color(name, variant)
+		}
+		return c
+	}
+
+	switch name {
+	case fyneTheme.ColorNameBackground:
+		if w := t.widget(KindForm); w != nil && w.Background != "" {
+			return pick(w.Background)
+		}
+	case fyneTheme.ColorNameForeground:
+		if w := t.widget(KindLabel); w != nil && w.Foreground != "" {
+			return pick(w.Foreground)
+		}
+	case fyneTheme.ColorNamePrimary,
+		fyneTheme.ColorNameFocus,
+		fyneTheme.ColorNameSelection:
+		if w := t.widget(KindButton); w != nil && w.Primary != "" {
+			return pick(w.Primary)
+		}
+	case fyneTheme.ColorNameOverlayBackground,
+		fyneTheme.ColorNameMenuBackground:
+		if w := t.widget(KindCard); w != nil && w.Background != "" {
+			return pick(w.Background)
+		}
+	case fyneTheme.ColorNameSeparator,
+		fyneTheme.ColorNameInputBorder:
+		if w := t.widget(KindCard); w != nil && w.Border != "" {
+			return pick(w.Border)
+		}
+	case fyneTheme.ColorNameHover:
+		// Light tint of the brand colour for button hover feedback.
+		if w := t.widget(KindButton); w != nil && w.Primary != "" {
+			c := ParseHex(w.Primary)
+			if nrgba, ok := c.(color.NRGBA); ok {
+				nrgba.A = 0x20
+				return nrgba
+			}
+		}
+	}
+
+	return t.base.Color(name, variant)
+}
+
+// widget returns the WidgetTheme for kind, or nil if none is present.
+func (t *GlobalFyneTheme) widget(kind WidgetKind) *WidgetTheme {
+	for i := range t.xtheme.Widgets {
+		if t.xtheme.Widgets[i].Kind == kind {
+			return &t.xtheme.Widgets[i]
+		}
+	}
+	return nil
 }
 
 func (t *GlobalFyneTheme) Font(style fyne.TextStyle) fyne.Resource {
