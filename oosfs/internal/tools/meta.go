@@ -69,6 +69,22 @@ func registerMeta(s *server.MCPServer, ctx *handlerCtx) {
 		mcp.WithString("pathspec", mcp.Description("Optional path filter relative to the repo (e.g. 'oos/core')")),
 	)
 	s.AddTool(gitDiffTool, ctx.handleGitDiff)
+
+	gitCommitTool := mcp.NewTool("git_commit",
+		mcp.WithDescription(
+			"Stage changes, create a commit, and optionally push. If 'paths' "+
+				"is omitted all tracked changes are staged ('git add -A'); "+
+				"otherwise only the listed paths are staged. Set push=true to "+
+				"push the resulting commit to the current branch's upstream.",
+		),
+		mcp.WithToolAnnotation(destructiveAnnotations("Git commit", false)),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Directory inside a git working tree")),
+		mcp.WithString("message", mcp.Required(), mcp.Description("Commit message (may contain newlines)")),
+		mcp.WithArray("paths", mcp.Description("Optional list of paths to stage; if empty, stages all tracked changes")),
+		mcp.WithBoolean("push", mcp.Description("Push to the current branch's upstream after committing (default: false)")),
+		mcp.WithBoolean("allow_empty", mcp.Description("Permit a commit that records no changes (default: false)")),
+	)
+	s.AddTool(gitCommitTool, ctx.handleGitCommit)
 }
 
 func (c *handlerCtx) handleAllowedRoots(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -260,6 +276,96 @@ func (c *handlerCtx) handleGitDiff(ctx context.Context, req mcp.CallToolRequest)
 		"empty":  strings.TrimSpace(out) == "",
 		"length": len(out),
 	}), nil
+}
+
+// handleGitCommit stages (optionally selected) paths, creates a commit, and
+// optionally pushes it. Returns the new commit SHA, branch, and whether the
+// push succeeded.
+//
+// Staging strategy: when 'paths' is empty, 'git add -A' is used so that
+// deletions and new files are picked up just like a human running the same
+// command. When 'paths' is given, only those entries are staged — useful
+// for carving a multi-file working tree into several focused commits.
+func (c *handlerCtx) handleGitCommit(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	path, err := req.RequireString("path")
+	if err != nil {
+		return c.errResult("git_commit", err), nil
+	}
+	message, err := req.RequireString("message")
+	if err != nil {
+		return c.errResult("git_commit", err), nil
+	}
+	if strings.TrimSpace(message) == "" {
+		return c.errResult("git_commit", fmt.Errorf("message must not be empty")), nil
+	}
+	paths := optionalStringSlice(req, "paths")
+	push := optionalBool(req, "push", false)
+	allowEmpty := optionalBool(req, "allow_empty", false)
+
+	abs, err := c.reg.Resolve(path)
+	if err != nil {
+		return c.errResult("git_commit", err), nil
+	}
+	dir := dirOf(abs)
+
+	// Stage. Explicit paths go through 'git add --' so filenames with
+	// leading dashes are handled safely; the bulk path uses 'add -A' so
+	// deletions are captured.
+	if len(paths) == 0 {
+		if _, err := runGit(dir, "add", "-A"); err != nil {
+			return c.errResult("git_commit", err), nil
+		}
+	} else {
+		args := append([]string{"add", "--"}, paths...)
+		if _, err := runGit(dir, args...); err != nil {
+			return c.errResult("git_commit", err), nil
+		}
+	}
+
+	// Commit. --allow-empty is only added on request because the common
+	// case — nothing staged — should surface as an error, not a silent
+	// no-op commit.
+	commitArgs := []string{"commit", "-m", message}
+	if allowEmpty {
+		commitArgs = append(commitArgs, "--allow-empty")
+	}
+	commitOut, err := runGit(dir, commitArgs...)
+	if err != nil {
+		return c.errResult("git_commit", err), nil
+	}
+
+	// Resolve the resulting SHA and branch for the caller. Both failures
+	// are non-fatal: the commit already exists at this point, and the
+	// caller can still work with the raw commit output.
+	sha := ""
+	if out, err := runGit(dir, "rev-parse", "HEAD"); err == nil {
+		sha = strings.TrimSpace(out)
+	}
+	branch := ""
+	if out, err := runGit(dir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+		branch = strings.TrimSpace(out)
+	}
+
+	result := map[string]any{
+		"dir":     dir,
+		"branch":  branch,
+		"sha":     sha,
+		"summary": strings.TrimSpace(commitOut),
+		"pushed":  false,
+	}
+
+	if push {
+		pushOut, err := runGit(dir, "push")
+		if err != nil {
+			// The commit is already in local history; bubble up the push
+			// error without discarding the commit metadata.
+			result["push_error"] = err.Error()
+			return jsonResult(result), nil
+		}
+		result["pushed"] = true
+		result["push_output"] = strings.TrimSpace(pushOut)
+	}
+	return jsonResult(result), nil
 }
 
 // findGitRoot walks up from dir looking for a .git entry.

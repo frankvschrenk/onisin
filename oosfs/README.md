@@ -83,6 +83,7 @@ Restart Claude Desktop after editing.
 | `project_info`  | Detect project structure (git / go / node / ...)    |
 | `git_status`    | Parse `git status --porcelain=v1 -b`                 |
 | `git_diff`      | Unstaged, staged, or revision diff                   |
+| `git_commit`    | Stage, commit, optionally push — single-call workflow |
 | `exec`          | Run a command in an allowed dir; returns exit/stdout/stderr/duration |
 | `exec_start`    | Start a long-running command; returns a session ID   |
 | `exec_read`     | Read incremental output from a streaming session     |
