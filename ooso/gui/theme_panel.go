@@ -13,11 +13,12 @@ import (
 	"bytes"
 	"fmt"
 	"image/color"
-	"io"
 
 	fynedsl "onisin.com/oos-dsl/dsl"
 	oostheme "onisin.com/oos-common/theme"
 
+	"github.com/frankvschrenk/fyne-codeedit"
+	"github.com/frankvschrenk/fyne-codeedit/format"
 	"github.com/lusingander/colorpicker"
 
 	"fyne.io/fyne/v2"
@@ -35,7 +36,23 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 	getWindow := func() fyne.Window {
 		return fyne.CurrentApp().Driver().AllWindows()[0]
 	}
-	xtheme := oostheme.DefaultTheme("light")
+	// loadThemeForVariant resolves the theme for a given variant,
+	// preferring the row stored in oos.config over the compiled-in
+	// default. Returns the default when the database is unreachable
+	// or the row is empty so the editor always opens on real
+	// colours rather than a blank slate.
+	loadThemeForVariant := func(v string) *oostheme.OOSTheme {
+		if conn.IsConnected() {
+			if xml, err := conn.Importer().LoadThemeXML(v); err == nil && xml != "" {
+				if parsed, perr := oostheme.ParseXML(xml); perr == nil {
+					return parsed
+				}
+			}
+		}
+		return oostheme.DefaultTheme(v)
+	}
+
+	xtheme := loadThemeForVariant("light")
 
 	// ── Preview-Fenster ───────────────────────────────────────────────────
 	var previewWin fyne.Window
@@ -110,15 +127,17 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 	// and the field-by-field editor on the other tab plus the preview
 	// window update to match. Also works the other way round: edits
 	// in the editor tab regenerate the XML here on every refreshAll.
-	xmlEditor := widget.NewMultiLineEntry()
-	xmlEditor.Wrapping = fyne.TextWrapOff
-	xmlEditor.SetPlaceHolder("<oos-theme>...</oos-theme>")
+	//
+	// Uses codeedit.ModalEditor so the theme XML shows with syntax
+	// highlighting by default. Enter (or click) drops into Edit mode
+	// for paste-and-Apply, Escape returns to the coloured preview.
+	xmlEditor := codeedit.NewModalEditor(codeedit.LangXML)
 
 	// xmlDirty guards refreshAll from stomping the user's unsaved
 	// edits in the XML tab while they are still typing. Flipped on
 	// every OnChanged, cleared when the editor writes its own text.
 	var xmlDirty bool
-	xmlEditor.OnChanged = func(string) { xmlDirty = true }
+	xmlEditor.OnChanged(func(string) { xmlDirty = true })
 
 	setXMLText := func(xml string) {
 		xmlEditor.SetText(xml)
@@ -246,20 +265,11 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 	buildEditor(xtheme.ForWidget(kinds[0]))
 
 	// Switching the variant reloads the corresponding theme row from
-	// oos.config; light and dark are two independent rows, so this
-	// really is a fetch, not just a flag flip on the current theme.
-	// If the row is missing, we fall back to the compiled-in default
-	// for that variant so the editor always starts on real colours.
+	// oos.config via loadThemeForVariant — light and dark are two
+	// independent rows, so this really is a fetch, not just a flag
+	// flip on the current theme.
 	variantRadio := widget.NewRadioGroup([]string{"light", "dark"}, func(v string) {
-		loaded := oostheme.DefaultTheme(v)
-		if conn.IsConnected() {
-			if xml, err := conn.Importer().LoadThemeXML(v); err == nil && xml != "" {
-				if parsed, perr := oostheme.ParseXML(xml); perr == nil {
-					loaded = parsed
-				}
-			}
-		}
-		xtheme = loaded
+		xtheme = loadThemeForVariant(v)
 		buildEditor(xtheme.ForWidget(kinds[0]))
 		widgetList.Select(0)
 		refreshAll()
@@ -287,96 +297,63 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 	editorSplit.SetOffset(0.25)
 
 	// ── Toolbar ───────────────────────────────────────────────────────────
+	//
+	// Same shape as the CTX and DSL panels: a labelled primary Save,
+	// a small Reset, and a status label on the right. File import
+	// and export were dropped — themes live in oos.config now, and
+	// the XML tab is the escape hatch for anyone who needs to
+	// copy-paste between environments.
 	statusLabel := widget.NewLabel("")
 
-	toolbar := widget.NewToolbar(
-		// Aus Datei laden
-		widget.NewToolbarAction(theme.FolderOpenIcon(), func() {
-			dialog.ShowFileOpen(func(f fyne.URIReadCloser, err error) {
-				if err != nil || f == nil {
-					return
-				}
-				defer f.Close()
-				data, err := io.ReadAll(f)
-				if err != nil {
-					statusLabel.SetText("Lesen: " + err.Error())
-					return
-				}
-				parsed, err := oostheme.ParseXML(string(data))
-				if err != nil {
-					statusLabel.SetText("XML: " + err.Error())
-					return
-				}
-				*xtheme = *parsed
-				buildEditor(xtheme.ForWidget(kinds[0]))
-				widgetList.Select(0)
-				variantRadio.SetSelected(xtheme.Variant)
-				refreshAll()
-				statusLabel.SetText("geladen: " + f.URI().Name())
-			}, getWindow())
-		}),
-		// Als Datei speichern
-		widget.NewToolbarAction(theme.DocumentSaveIcon(), func() {
-			xml, err := xtheme.ToXML()
-			if err != nil {
-				statusLabel.SetText(err.Error())
-				return
-			}
-			dialog.ShowFileSave(func(f fyne.URIWriteCloser, err error) {
-				if err != nil || f == nil {
-					return
-				}
-				defer f.Close()
-				if _, err := f.Write([]byte(xml)); err != nil {
-					statusLabel.SetText("Schreiben: " + err.Error())
-					return
-				}
-				statusLabel.SetText("gespeichert: " + f.URI().Name())
-			}, getWindow())
-		}),
-		widget.NewToolbarSeparator(),
-		// Save into oos.config under theme.<variant>. The variant in
-		// the theme's own <oos-theme variant="..."> attribute decides
-		// which row we target, so the editor writes where the desktop
-		// client will later read.
-		widget.NewToolbarAction(theme.UploadIcon(), func() {
-			if !conn.IsConnected() {
-				statusLabel.SetText("nicht verbunden")
-				return
-			}
-			xml, err := xtheme.ToXML()
-			if err != nil {
-				statusLabel.SetText(err.Error())
-				return
-			}
-			if err := conn.Importer().ImportThemeXML(xtheme.Variant, xml); err != nil {
-				statusLabel.SetText(err.Error())
-				return
-			}
-			statusLabel.SetText(fmt.Sprintf("gespeichert → oos.config[theme.%s]", xtheme.Variant))
-		}),
-		widget.NewToolbarSeparator(),
-		// Reset to the compiled-in default for the currently-selected
-		// variant. Keeps the radio selection so "reset dark" stays dark.
-		widget.NewToolbarAction(theme.ContentClearIcon(), func() {
-			xtheme = oostheme.DefaultTheme(xtheme.Variant)
-			buildEditor(xtheme.ForWidget(kinds[0]))
-			widgetList.Select(0)
-			variantRadio.SetSelected(xtheme.Variant)
-			refreshAll()
-			statusLabel.SetText("")
-		}),
-		widget.NewToolbarSpacer(),
+	saveThemeBtn := widget.NewButtonWithIcon("Speichern", theme.DocumentSaveIcon(), func() {
+		if !conn.IsConnected() {
+			statusLabel.SetText("nicht verbunden")
+			return
+		}
+		xml, err := xtheme.ToXML()
+		if err != nil {
+			statusLabel.SetText(err.Error())
+			return
+		}
+		if err := conn.Importer().ImportThemeXML(xtheme.Variant, xml); err != nil {
+			statusLabel.SetText(err.Error())
+			return
+		}
+		statusLabel.SetText(fmt.Sprintf("gespeichert → oos.config[theme.%s]", xtheme.Variant))
+	})
+	saveThemeBtn.Importance = widget.HighImportance
+
+	// Reset pulls the compiled-in default for the current variant
+	// back into the editor. Useful when the user has experimented
+	// themselves into a corner and wants a clean starting point
+	// without going through the database.
+	resetBtn := widget.NewButtonWithIcon("Reset", theme.ContentClearIcon(), func() {
+		xtheme = oostheme.DefaultTheme(xtheme.Variant)
+		buildEditor(xtheme.ForWidget(kinds[0]))
+		widgetList.Select(0)
+		variantRadio.SetSelected(xtheme.Variant)
+		refreshAll()
+		statusLabel.SetText("auf Default zurückgesetzt")
+	})
+
+	// container.NewPadded wraps the button row in a theme-padding
+	// frame; without it the buttons sit flush against the tab
+	// content above and the window edge below.
+	toolbar := container.NewPadded(
+		container.NewHBox(saveThemeBtn, resetBtn),
 	)
 
-	bottomBar := container.NewBorder(nil, nil, nil, statusLabel, toolbar)
+	bottomBar := container.NewBorder(nil, nil, nil,
+		container.NewPadded(statusLabel),
+		toolbar,
+	)
 
 	// XML-Tab toolbar: Apply parses the editor content and pushes it
 	// back into xtheme, then refreshes the field editor, preview and
 	// live-applied Fyne theme. Revert throws away unsaved edits and
 	// regenerates the XML from the current xtheme.
 	xmlApplyBtn := widget.NewButtonWithIcon("Apply", theme.ConfirmIcon(), func() {
-		parsed, err := oostheme.ParseXML(xmlEditor.Text)
+		parsed, err := oostheme.ParseXML(xmlEditor.Text())
 		if err != nil {
 			statusLabel.SetText("XML: " + err.Error())
 			return
@@ -398,7 +375,28 @@ func buildThemePanel(conn *Connection) (fyne.CanvasObject, func()) {
 		}
 	})
 
-	xmlToolbar := container.NewHBox(xmlApplyBtn, xmlRevertBtn)
+	xmlFormatBtn := widget.NewButtonWithIcon("Format", theme.ViewRefreshIcon(), func() {
+		src := xmlEditor.Text()
+		if src == "" {
+			return
+		}
+		pretty, err := format.FormatXML(src)
+		if err != nil {
+			statusLabel.SetText("Format: " + err.Error())
+			return
+		}
+		setXMLText(pretty)
+		xmlDirty = true
+		statusLabel.SetText("formatiert")
+	})
+
+	// NewPadded wraps the toolbar in a theme-padding frame so the
+	// buttons breathe on all sides instead of sitting flush against
+	// the tab strip and the editor. Cheaper than hand-rolling
+	// spacers; picks up the theme's Padding size automatically.
+	xmlToolbar := container.NewPadded(
+		container.NewHBox(xmlApplyBtn, xmlFormatBtn, xmlRevertBtn),
+	)
 	xmlTab := container.NewBorder(xmlToolbar, nil, nil, nil, xmlEditor)
 
 	// ── Tabs ──────────────────────────────────────────────────────────────
