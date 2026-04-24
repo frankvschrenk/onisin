@@ -502,3 +502,46 @@ func (h *handler) schemaSearch(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, results)
 }
+
+// dslSchemaAll returns every DSL element chunk from oos.oos_dsl_schema.
+// Mirrors schemaAll but for the DSL retrieval table — used by oos to
+// inspect the available element vocabulary, not as a primary feed for
+// the chat agent (the agent uses dslSchemaSearch instead).
+func (h *handler) dslSchemaAll(c echo.Context) error {
+	if h.svc.DSLSchemaAll == nil {
+		return errJSON(c, http.StatusServiceUnavailable, "dsl schema not available")
+	}
+	result, err := h.svc.DSLSchemaAll()
+	if err != nil {
+		return errJSON(c, http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// dslSchemaSearch returns the top n DSL element chunks most similar to
+// the natural-language query, embedded with granite-embedding and
+// ranked by cosine distance against oos.oos_dsl_schema. The chat
+// agent in oos calls this once per layout concept it needs to ground.
+func (h *handler) dslSchemaSearch(c echo.Context) error {
+	var req struct {
+		Query string `json:"query"`
+		N     int    `json:"n"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return errJSON(c, http.StatusBadRequest, "invalid request")
+	}
+	if req.Query == "" {
+		return errJSON(c, http.StatusBadRequest, "query required")
+	}
+	if req.N <= 0 {
+		req.N = 3
+	}
+	if h.svc.DSLSchemaSearch == nil {
+		return errJSON(c, http.StatusServiceUnavailable, "dsl schema search not available")
+	}
+	results, err := h.svc.DSLSchemaSearch(req.Query, req.N)
+	if err != nil {
+		return errJSON(c, http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, results)
+}

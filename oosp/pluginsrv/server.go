@@ -278,6 +278,12 @@ func startRESTServer(addr string) error {
 		SchemaAll: func() (any, error) {
 			return SchemaAll()
 		},
+		DSLSchemaSearch: func(query string, n int) (any, error) {
+			return DSLSchemaSearch(query, n)
+		},
+		DSLSchemaAll: func() (any, error) {
+			return DSLSchemaAll()
+		},
 		// Event System APIs
 		EventSearch: func(mapping, query, streamID string, limit int) (any, error) {
 			return EventSearch(mapping, query, streamID, limit)

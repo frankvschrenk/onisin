@@ -177,5 +177,30 @@ func buildTools() []tool.BaseTool {
 				return oostools.Status(), nil
 			},
 		},
+		&oosTool{
+			info: &schema.ToolInfo{
+				Name: "oos_dsl_schema_search",
+				Desc: "Look up DSL element grammar by natural-language layout intent. " +
+					"Returns one or more element chunks (each with the XML tag, " +
+					"German aliases, intent, attribute list with allowed values, " +
+					"valid children, a copy-pasteable example, and AI hints). " +
+					"Call this once per layout concept the user mentions when " +
+					"the goal is to generate or modify a *.dsl.xml screen — " +
+					"e.g. one search for 'two fields side by side', another for " +
+					"'tabs', another for 'dropdown'. Then assemble the full " +
+					"<screen> XML from the retrieved fragments.",
+				ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+					"query": {Type: schema.String, Desc: "Layout intent in natural language, e.g. 'zwei Felder nebeneinander', 'Reiter mit verschiedenen Seiten', 'Datentabelle mit Spalten'", Required: true},
+					"n":     {Type: schema.String, Desc: "Number of element chunks to return (default 3)"},
+				}),
+			},
+			fn: func(m map[string]any) (string, error) {
+				n := 3
+				if ns := str(m, "n"); ns != "" {
+					fmt.Sscanf(ns, "%d", &n) //nolint:errcheck
+				}
+				return oostools.DSLSchemaSearch(str(m, "query"), n)
+			},
+		},
 	}
 }

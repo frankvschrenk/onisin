@@ -161,6 +161,28 @@ func SchemaSearch(query string, n int) ([]store.SchemaChunk, error) {
 	return activeSchema.Search(context.Background(), query, n)
 }
 
+// DSLSchemaAll returns every DSL element chunk currently held in
+// oos.oos_dsl_schema. Used by oos for diagnostics.
+func DSLSchemaAll() ([]store.DSLChunk, error) {
+	if activeDSLSchema == nil {
+		return nil, fmt.Errorf("dsl schema store not initialised")
+	}
+	return activeDSLSchema.All()
+}
+
+// DSLSchemaSearch returns the top n DSL element chunks most similar to
+// query. Used by the chat agent in oos to ground a single layout
+// concept ("zwei felder nebeneinander", "datentabelle") to the
+// matching DSL element(s) before emitting the *.dsl.xml. Filter is
+// hard-coded to kind='element' since pattern-level chunks are not
+// populated today.
+func DSLSchemaSearch(query string, n int) ([]store.DSLChunk, error) {
+	if activeDSLSchema == nil {
+		return nil, fmt.Errorf("dsl schema store not initialised")
+	}
+	return activeDSLSchema.Search(context.Background(), query, "element", n)
+}
+
 // openDB opens a new *sql.DB connection to dsn.
 func openDB(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("postgres", dsn)

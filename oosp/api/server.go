@@ -25,6 +25,8 @@ type Services struct {
 	SetTheme        func(variant, xml string) error
 	SchemaSearch    func(query string, n int) (any, error)
 	SchemaAll       func() (any, error)
+	DSLSchemaSearch func(query string, n int) (any, error)
+	DSLSchemaAll    func() (any, error)
 
 	// Event System API
 	EventSearch   func(mapping, query, streamID string, limit int) (any, error)
@@ -63,6 +65,8 @@ func (s *Server) Start() error {
 	e.POST("/vector/search", h.vectorSearch)
 	e.POST("/schema/search", h.schemaSearch)
 	e.GET("/schema/all", h.schemaAll)
+	e.POST("/dsl/schema/search", h.dslSchemaSearch)
+	e.GET("/dsl/schema/all", h.dslSchemaAll)
 
 	// Event System Routes
 	e.POST("/event/search", h.eventSearch)
