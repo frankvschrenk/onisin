@@ -307,7 +307,7 @@ const personDetailDSL = `<screen id="person_detail" title="Person — Detail" la
         </section>
         <section cols="2" gap="4" mt="2">
           <field label="Anstellungsart" bind="person.employment" widget="radio"  options="employment_types"/>
-          <field label="Aktiv"          bind="person.active"     widget="check"  label="Mitarbeiter aktiv"/>
+          <field bind="person.active" widget="check" label="Mitarbeiter aktiv"/>
         </section>
       </section>
     </tab>
