@@ -89,6 +89,12 @@ type CodeEditor struct {
 	// Comment drives Ctrl+K toggling. Leave zero to disable.
 	Comment CommentStyle
 
+	// OnEscape, when set, is invoked whenever the user presses the
+	// Escape key while the editor has focus. Used by [ModalEditor]
+	// to return to preview mode; callers embedding a CodeEditor
+	// directly may leave this nil.
+	OnEscape func()
+
 	// shiftDown tracks whether either Shift key is held. Fyne
 	// delivers Shift and Tab as two separate TypedKey events rather
 	// than bundling them into a modifier-aware shortcut, so we
@@ -141,6 +147,11 @@ func (e *CodeEditor) TypedKey(ev *fyne.KeyEvent) {
 	case fyne.KeyReturn, fyne.KeyEnter:
 		e.handleEnter()
 		return
+	case fyne.KeyEscape:
+		if e.OnEscape != nil {
+			e.OnEscape()
+			return
+		}
 	}
 	e.Entry.TypedKey(ev)
 }

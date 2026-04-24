@@ -1,6 +1,13 @@
-// Command demo launches a small Fyne window with a CodeEditor bound
-// to an XML snippet so the editor-style shortcuts can be exercised
-// by hand. Run with:
+// Command demo launches a single ModalEditor — two stages stacked:
+//
+//   - Preview: chroma-highlighted, read-only
+//   - Edit:    plain CodeEditor with editor shortcuts
+//
+// Press Enter in Preview to switch to Edit; press Escape in Edit to
+// switch back to Preview. A badge in the top-right corner reports
+// which stage is active.
+//
+// Run with:
 //
 //	go run ./cmd/demo
 package main
@@ -31,17 +38,16 @@ const sampleXML = `<?xml version="1.0" encoding="UTF-8"?>
 func main() {
 	a := app.NewWithID("com.frankvschrenk.fyne-codeedit.demo")
 	w := a.NewWindow("fyne-codeedit — Demo")
-	w.Resize(fyne.NewSize(800, 600))
+	w.Resize(fyne.NewSize(900, 600))
 
-	editor := codeedit.NewWithLanguage(codeedit.LangXML)
+	editor := codeedit.NewModalEditor(codeedit.LangXML)
 	editor.SetText(sampleXML)
 
 	help := widget.NewLabel(
-		"Tab / Shift+Tab — indent / dedent\n" +
-			"Enter — auto-indent from current line\n" +
-			"Ctrl+D — delete current line\n" +
-			"Ctrl+L — insert line above\n" +
-			"Ctrl+K — toggle XML comment",
+		"Preview: Enter → Edit.    Edit: Escape → Preview.    " +
+			"Tab/Shift+Tab — indent/dedent.    " +
+			"Ctrl+D — delete line.    Ctrl+L — insert line above.    " +
+			"Ctrl+K — toggle comment.",
 	)
 
 	w.SetContent(container.NewBorder(nil, help, nil, nil, editor))
