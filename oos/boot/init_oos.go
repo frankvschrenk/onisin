@@ -10,6 +10,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"onisin.com/oos-common/gql"
+	"onisin.com/oos-common/llm"
 	oostheme "onisin.com/oos-common/theme"
 	"onisin.com/oos/helper"
 )
@@ -40,7 +41,7 @@ func initOOS() {
 	}
 
 	log.Printf("[boot] ✅ OOS ready — %d contexts", len(ast.Contexts))
-	log.Printf("[boot] LLM endpoint: %s", helper.LLMUrl)
+	log.Printf("[boot] LLM endpoint: %s", llm.URL)
 
 	loadAndApplyTheme()
 }

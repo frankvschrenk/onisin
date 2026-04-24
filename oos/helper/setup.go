@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+	"onisin.com/oos-common/llm"
 	"onisin.com/oos/appdirs"
 )
 
@@ -68,26 +69,26 @@ func LoadAppDirsConfig() error {
 		Meta.Vault.URL = v
 	}
 	if v := viper.GetString("llm.url"); v != "" {
-		LLMUrl = v
+		llm.URL = v
 	}
 	if v := viper.GetString("llm.api_key"); v != "" {
-		LLMApiKey = v
+		llm.APIKey = v
 	}
 	// Viper sometimes misreads TOML keys with underscores — try both variants.
 	if v := viper.GetString("llm.chat_model"); v != "" {
-		LLMChatModel = v
+		llm.ChatModel = v
 	} else if v := viper.GetString("llm.chat-model"); v != "" {
-		LLMChatModel = v
+		llm.ChatModel = v
 	}
 	if v := viper.GetString("llm.schema_strategy"); v != "" {
-		LLMSchemaStrategy = v
+		llm.SchemaStrategy = v
 	}
 
 	applyThemeVariantFromViper()
 
 	log.Printf("[config] loaded: %s", path)
 	log.Printf("[config] OOSP: %s  LLM: %s  chat-model: %s  api-key: %s",
-		Meta.OOSPUrl, LLMUrl, LLMChatModel, maskKey(LLMApiKey))
+		Meta.OOSPUrl, llm.URL, llm.ChatModel, maskKey(llm.APIKey))
 
 	return nil
 }
@@ -133,9 +134,9 @@ func SaveConfig(cfg SetupConfig) error {
 	Meta.IAM.IssuerURL = cfg.DexURL
 	Meta.IAM.ClientID = cfg.ClientID
 	Meta.Vault.URL = cfg.VaultURL
-	LLMUrl = cfg.LLMAddr
-	LLMApiKey = cfg.LLMApiKey
-	LLMChatModel = cfg.LLMChatModel
+	llm.URL = cfg.LLMAddr
+	llm.APIKey = cfg.LLMApiKey
+	llm.ChatModel = cfg.LLMChatModel
 
 	log.Printf("[config] saved: %s", path)
 	return nil
@@ -149,9 +150,9 @@ func DefaultSetupConfig() SetupConfig {
 		DexURL:       orDefault(Meta.IAM.IssuerURL, "http://localhost:5556"),
 		VaultURL:     orDefault(Meta.Vault.URL, "http://localhost:8200"),
 		ClientID:     orDefault(Meta.IAM.ClientID, "oos-desktop"),
-		LLMAddr:      orDefault(LLMUrl, "http://localhost:11434"),
-		LLMApiKey:    LLMApiKey,
-		LLMChatModel: LLMChatModel,
+		LLMAddr:      orDefault(llm.URL, "http://localhost:11434"),
+		LLMApiKey:    llm.APIKey,
+		LLMChatModel: llm.ChatModel,
 	}
 }
 

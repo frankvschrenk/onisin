@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
+	"onisin.com/oos-common/llm"
 	"onisin.com/oos/helper"
 )
 
@@ -84,15 +85,15 @@ func OpenSettingsDialog() {
 	vaultEntry.SetPlaceHolder("http://localhost:8200")
 
 	llmAddrEntry := widget.NewEntry()
-	llmAddrEntry.SetText(helper.LLMUrl)
+	llmAddrEntry.SetText(llm.URL)
 	llmAddrEntry.SetPlaceHolder("http://localhost:11434")
 
 	llmApiKeyEntry := widget.NewPasswordEntry()
-	llmApiKeyEntry.SetText(helper.LLMApiKey)
+	llmApiKeyEntry.SetText(llm.APIKey)
 	llmApiKeyEntry.SetPlaceHolder("leave empty for local models")
 
 	llmModelEntry := widget.NewEntry()
-	llmModelEntry.SetText(helper.LLMChatModel)
+	llmModelEntry.SetText(llm.ChatModel)
 	llmModelEntry.SetPlaceHolder("e.g. gemma4:26b")
 
 	pingBtn := widget.NewButton("Test OOSP", func() {

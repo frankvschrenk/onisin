@@ -12,13 +12,12 @@ package aiassist
 
 import (
 	"log"
-	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
-	"onisin.com/oos/helper"
+	"onisin.com/oos-common/llm"
 )
 
 // chatMode is the active mode of the AI assistant window.
@@ -161,7 +160,7 @@ func (h *modeHeader) setMode(m chatMode) {
 // populates the model dropdown. The user's configured default is pre-selected
 // when present, otherwise the first returned model wins.
 func (h *modeHeader) loadModels() {
-	models, err := helper.LLMModels()
+	models, err := llm.Models()
 	if err != nil {
 		log.Printf("[aiassist] fetch models: %v", err)
 		fyne.Do(func() {
@@ -174,7 +173,7 @@ func (h *modeHeader) loadModels() {
 	// Drop embedding-only models — the chat doesn't use them.
 	chatModels := make([]string, 0, len(models))
 	for _, m := range models {
-		if !isChatLikeName(m) {
+		if llm.IsEmbeddingModel(m) {
 			continue
 		}
 		chatModels = append(chatModels, m)
@@ -185,26 +184,13 @@ func (h *modeHeader) loadModels() {
 		switch {
 		case len(chatModels) == 0:
 			h.modelSel.PlaceHolder = "(none found)"
-		case helper.LLMChatModel != "" && containsString(chatModels, helper.LLMChatModel):
-			h.modelSel.SetSelected(helper.LLMChatModel)
+		case llm.ChatModel != "" && containsString(chatModels, llm.ChatModel):
+			h.modelSel.SetSelected(llm.ChatModel)
 		default:
 			h.modelSel.SetSelected(chatModels[0])
 		}
 		h.modelSel.Refresh()
 	})
-}
-
-// isChatLikeName returns false for model names that look like embedding-only
-// models. Mirrors helper.isEmbeddingModel but we can't reach that one from
-// here — keep the short list in sync when new providers appear.
-func isChatLikeName(name string) bool {
-	lower := strings.ToLower(name)
-	for _, kw := range []string{"embedding", "embed", "e5-", "bge-", "gte-"} {
-		if strings.Contains(lower, kw) {
-			return false
-		}
-	}
-	return true
 }
 
 // containsString reports whether s is in list.

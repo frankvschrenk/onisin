@@ -2,7 +2,7 @@ package tools
 
 // schema.go — OOS schema loading and injection for AI context.
 //
-// Three strategies controlled by helper.LLMSchemaStrategy:
+// Three strategies controlled by llm.SchemaStrategy:
 //
 //   compact — inject a one-line summary per context into the prompt;
 //             oos_schema_search is still available for GraphQL details.
@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"onisin.com/oos-common/dsl"
+	"onisin.com/oos-common/llm"
 	"onisin.com/oos/helper"
 )
 
@@ -84,7 +85,7 @@ func BuildSchemaPrompt() string {
 	if schemaCache.loaded {
 		return schemaCache.prompt
 	}
-	switch helper.LLMSchemaStrategy {
+	switch llm.SchemaStrategy {
 	case "full":
 		schemaCache.prompt = buildFullSchema()
 	case "rag":

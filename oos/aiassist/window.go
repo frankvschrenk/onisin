@@ -25,11 +25,11 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
-	"onisin.com/oos/helper"
+	"onisin.com/oos-common/llm"
 )
 
 // OpenWindow opens a new AI Assistant chat window.
-// The session is initialised from the current helper.LLMUrl configuration.
+// The session is initialised from the current llm.URL configuration.
 func OpenWindow(app fyne.App) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -49,7 +49,7 @@ func OpenWindow(app fyne.App) error {
 		app:      app,
 		session:  session,
 		chat:     newChatPanel(),
-		activity: newActivityPanel(session.ModelName(), helper.LLMUrl),
+		activity: newActivityPanel(session.ModelName(), llm.URL),
 		typing:   newTypingIndicator(),
 		events:   newEventPanel(app),
 		settings: settings,
@@ -150,7 +150,7 @@ func (aw *assistWindow) build() {
 	aw.activity.SetActive(false, "Ready")
 	aw.chat.addAssistantMessage(
 		"OOS",
-		fmt.Sprintf("Ready — %s @ %s", aw.session.ModelName(), helper.LLMUrl),
+		fmt.Sprintf("Ready — %s @ %s", aw.session.ModelName(), llm.URL),
 	)
 }
 
@@ -387,6 +387,6 @@ func (aw *assistWindow) reset() {
 		aw.activity.SetActive(false, "Ready")
 		aw.activity.UpdateSystemInfo(0, "—")
 		aw.chat.addAssistantMessage("OOS",
-			fmt.Sprintf("Ready — %s @ %s", aw.session.ModelName(), helper.LLMUrl))
+			fmt.Sprintf("Ready — %s @ %s", aw.session.ModelName(), llm.URL))
 	})
 }

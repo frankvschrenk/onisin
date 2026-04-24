@@ -17,14 +17,14 @@ import (
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 
-	"onisin.com/oos/helper"
+	"onisin.com/oos-common/llm"
 )
 
 // newChatModel creates an eino ToolCallingChatModel using the default model
-// resolved via helper.LLMFirstChatModel (preferred user setting or first
+// resolved via llm.FirstChatModel (preferred user setting or first
 // non-embedding model discovered at the endpoint).
 func newChatModel(ctx context.Context) (model.ToolCallingChatModel, string, error) {
-	modelName, err := helper.LLMFirstChatModel()
+	modelName, err := llm.FirstChatModel()
 	if err != nil {
 		return nil, "", fmt.Errorf("no chat model available: %w", err)
 	}
@@ -38,7 +38,7 @@ func newChatModelWithName(ctx context.Context, modelName string) (model.ToolCall
 		return newChatModel(ctx)
 	}
 
-	apiKey := helper.LLMApiKey
+	apiKey := llm.APIKey
 	if apiKey == "" {
 		// Ollama and most local endpoints accept any non-empty key.
 		apiKey = "ollama"
@@ -57,12 +57,12 @@ func newChatModelWithName(ctx context.Context, modelName string) (model.ToolCall
 }
 
 // buildBaseURL returns the correct /v1 base URL for the OpenAI-compatible API.
-// If the configured LLMUrl already ends with /v1 it is used as-is,
+// If the configured llm.URL already ends with /v1 it is used as-is,
 // otherwise /v1 is appended. This handles both:
 //   - Ollama:  http://localhost:11434      → http://localhost:11434/v1
 //   - vLLM:    http://host:8000/v1         → http://host:8000/v1
 func buildBaseURL() string {
-	u := strings.TrimRight(helper.LLMUrl, "/")
+	u := strings.TrimRight(llm.URL, "/")
 	if strings.HasSuffix(u, "/v1") {
 		return u
 	}

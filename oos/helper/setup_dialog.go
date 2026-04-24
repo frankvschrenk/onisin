@@ -14,6 +14,8 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
+
+	"onisin.com/oos-common/llm"
 )
 
 // NativeInputResult carries the values collected by the setup or settings dialog.
@@ -91,7 +93,7 @@ func showSetupDialog(current SetupConfig, errorMsg string) NativeInputResult {
 
 	llmAddrEntry := widget.NewEntry()
 	llmAddrEntry.SetPlaceHolder("http://localhost:11434")
-	llmAddrEntry.SetText(orDefault(current.LLMAddr, LLMUrl))
+	llmAddrEntry.SetText(orDefault(current.LLMAddr, llm.URL))
 
 	llmApiKeyEntry := widget.NewPasswordEntry()
 	llmApiKeyEntry.SetPlaceHolder("leave empty for local models")
@@ -99,7 +101,7 @@ func showSetupDialog(current SetupConfig, errorMsg string) NativeInputResult {
 
 	llmModelEntry := widget.NewEntry()
 	llmModelEntry.SetPlaceHolder("e.g. gemma4:26b")
-	llmModelEntry.SetText(orDefault(current.LLMChatModel, LLMChatModel))
+	llmModelEntry.SetText(orDefault(current.LLMChatModel, llm.ChatModel))
 
 	pingBtn := widget.NewButton("Test OOSP", func() {
 		ping := PingOOSP(oospEntry.Text)

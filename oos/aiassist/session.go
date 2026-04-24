@@ -20,7 +20,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	ucb "github.com/cloudwego/eino/utils/callbacks"
 
-	"onisin.com/oos/helper"
+	"onisin.com/oos-common/llm"
 	ootools "onisin.com/oos/tools"
 )
 
@@ -50,7 +50,7 @@ func NewSessionWithModel(ctx context.Context, modelName string) (*Session, error
 	// can embed it as a closure without needing a setter on the agent.
 	schemaPrompt := ootools.BuildSchemaPrompt()
 	log.Printf("[aiassist] schema strategy: %s (%d chars)",
-		helper.LLMSchemaStrategy, len(schemaPrompt))
+		llm.SchemaStrategy, len(schemaPrompt))
 
 	agent, err := react.NewAgent(ctx, &react.AgentConfig{
 		ToolCallingModel: cm,
