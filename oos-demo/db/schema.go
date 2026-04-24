@@ -10,6 +10,7 @@ package db
 //       oos.dsl             — DSL screen definition files (*.dsl.xml)
 //       oos.config          — hstore key-value store
 //       oos.oos_ctx_schema  — CTX schema chunks + embeddings for AI prompt injection
+//       oos.oos_dsl_schema  — DSL schema chunks + embeddings (elements + patterns)
 //       oos.event_mappings  — registry for the generic event → vector pipeline
 //
 // Application tables (public.person, public.note, ...) and demo tables
@@ -250,6 +251,37 @@ func setupOOSTables(db *sql.DB) error {
 			ON oos.oos_ctx_schema USING ivfflat (embedding vector_cosine_ops)
 			WITH (lists = 10);
 
+		-- oos.oos_dsl_schema — DSL schema chunks for AI prompt injection.
+		-- Carries two shapes of chunks, distinguished by kind:
+		--
+		--   'element'  — one row per DSL element type (field, section,
+		--                table, ...). Generated once from the dsl.xsd
+		--                grammar at oosp startup and after every XSD
+		--                change.
+		--   'pattern'  — one row per seeded *.dsl.xml screen. Captures
+		--                real-world usage so the AI engine can retrieve
+		--                concrete examples by intent, not just grammar.
+		--                Regenerated on oos.dsl changes via the trigger
+		--                below.
+		--
+		-- Chunk IDs carry the kind as a prefix ("element:field",
+		-- "pattern:person_detail") so retrieval and targeted refresh
+		-- can filter on a simple LIKE without joining kind.
+		CREATE TABLE IF NOT EXISTS oos.oos_dsl_schema (
+			id         varchar(200) PRIMARY KEY,
+			kind       varchar(20)  NOT NULL CHECK (kind IN ('element', 'pattern')),
+			chunk      text         NOT NULL,
+			embedding  vector(384),
+			updated_at timestamptz  NOT NULL DEFAULT now()
+		);
+
+		CREATE INDEX IF NOT EXISTS oos_dsl_schema_embedding_idx
+			ON oos.oos_dsl_schema USING ivfflat (embedding vector_cosine_ops)
+			WITH (lists = 10);
+
+		CREATE INDEX IF NOT EXISTS oos_dsl_schema_kind_idx
+			ON oos.oos_dsl_schema (kind);
+
 		-- oos.event_mappings — registry for the generic event pipeline.
 		-- Each row wires a source table (application events) to a target
 		-- vector table that oosp writes embeddings into.
@@ -287,6 +319,22 @@ func setupOOSTables(db *sql.DB) error {
 		CREATE TRIGGER ctx_notify
 			AFTER INSERT OR UPDATE ON oos.ctx
 			FOR EACH ROW EXECUTE FUNCTION oos.notify_ctx();
+
+		-- oosp listens on 'oos_dsl_notify' to rebuild the pattern chunks
+		-- for the changed screen. Only the id is sent — oosp fetches the
+		-- XML itself. Same pattern as oos_ctx_notify above.
+		CREATE OR REPLACE FUNCTION oos.notify_dsl()
+		RETURNS TRIGGER LANGUAGE plpgsql AS $func$
+		BEGIN
+			PERFORM pg_notify('oos_dsl_notify', NEW.id);
+			RETURN NEW;
+		END;
+		$func$;
+
+		DROP TRIGGER IF EXISTS dsl_notify ON oos.dsl;
+		CREATE TRIGGER dsl_notify
+			AFTER INSERT OR UPDATE ON oos.dsl
+			FOR EACH ROW EXECUTE FUNCTION oos.notify_dsl();
 
 		-- updated_at triggers for ctx and dsl
 		DROP TRIGGER IF EXISTS ctx_updated_at ON oos.ctx;
