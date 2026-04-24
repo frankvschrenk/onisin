@@ -9,7 +9,7 @@ package db
 //       oos.ctx             — CTX definition files (*.ctx.xml)
 //       oos.dsl             — DSL screen definition files (*.dsl.xml)
 //       oos.config          — hstore key-value store
-//       oos.oos_schema      — CTX schema chunks + embeddings for AI prompt injection
+//       oos.oos_ctx_schema  — CTX schema chunks + embeddings for AI prompt injection
 //       oos.event_mappings  — registry for the generic event → vector pipeline
 //
 // Application tables (public.person, public.note, ...) and demo tables
@@ -233,17 +233,21 @@ func setupOOSTables(db *sql.DB) error {
 			BEFORE UPDATE ON oos.config
 			FOR EACH ROW EXECUTE FUNCTION oos.set_updated_at();
 
-		-- oos.oos_schema — CTX schema chunks for AI prompt injection.
+		-- oos.oos_ctx_schema — CTX schema chunks for AI prompt injection.
 		-- One row per context, embedded via granite-embedding (384-dim).
-		CREATE TABLE IF NOT EXISTS oos.oos_schema (
+		--
+		-- Drop the pre-rename table if it still exists from a previous dev
+		-- seed. pg_notify state carries no data we care about losing here.
+		DROP TABLE IF EXISTS oos.oos_schema CASCADE;
+		CREATE TABLE IF NOT EXISTS oos.oos_ctx_schema (
 			context_name varchar(200) PRIMARY KEY,
 			chunk        text         NOT NULL,
 			embedding    vector(384),
 			updated_at   timestamptz  NOT NULL DEFAULT now()
 		);
 
-		CREATE INDEX IF NOT EXISTS oos_schema_embedding_idx
-			ON oos.oos_schema USING ivfflat (embedding vector_cosine_ops)
+		CREATE INDEX IF NOT EXISTS oos_ctx_schema_embedding_idx
+			ON oos.oos_ctx_schema USING ivfflat (embedding vector_cosine_ops)
 			WITH (lists = 10);
 
 		-- oos.event_mappings — registry for the generic event pipeline.

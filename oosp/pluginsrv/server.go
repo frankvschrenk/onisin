@@ -147,7 +147,7 @@ func initEmbedStore() {
 }
 
 // initSchemaStore wires up the SchemaStore, runs a backfill and starts
-// the pg_notify listener so oos.oos_schema stays current.
+// the pg_notify listener so oos.oos_ctx_schema stays current.
 //
 // The SchemaStore needs the ContextStore so it can translate oos.ctx row
 // ids into ContextAst slices for chunk rendering — the same AST the
@@ -198,7 +198,7 @@ func initSchemaStore() {
 	}
 	activeSchema.SetOnChange(onCTXChange)
 
-	// Backfill: embed any CTX rows that are not yet in oos.oos_schema.
+	// Backfill: embed any CTX rows that are not yet in oos.oos_ctx_schema.
 	go func() {
 		if err := activeSchema.Backfill(); err != nil {
 			log.Printf("[oosp] schema backfill: %v", err)

@@ -35,7 +35,7 @@ type SchemaChunk struct {
 	Chunk       string `json:"chunk"`
 }
 
-// SchemaSearch queries oos.oos_schema via OOSP for the n chunks most
+// SchemaSearch queries oos.oos_ctx_schema via OOSP for the n chunks most
 // relevant to query. Returns the combined chunk text ready for prompt injection.
 func SchemaSearch(query string, n int) (string, error) {
 	if helper.OOSP == nil {

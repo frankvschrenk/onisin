@@ -1,6 +1,6 @@
 package store
 
-// schema_store.go — oos.oos_schema read/write operations.
+// schema_store.go — oos.oos_ctx_schema read/write operations.
 //
 // SchemaStore manages the CTX schema chunks table used for AI context injection.
 // On startup oosp processes all existing oos.ctx rows (backfill).
@@ -44,12 +44,12 @@ func (s *SchemaStore) SetOnChange(fn func()) {
 }
 
 // ProcessCTX fetches the ContextAst slice for ctxID via the context store,
-// renders one chunk per context and upserts each into oos.oos_schema.
+// renders one chunk per context and upserts each into oos.oos_ctx_schema.
 //
 // Rows that don't describe contexts (e.g. global.conf, groups) return an
 // empty slice and are quietly skipped: their content is either wired
 // directly into the LLM system prompt (global prompts) or is operational
-// metadata the retriever has no use for. Dumping raw XML into oos_schema
+// metadata the retriever has no use for. Dumping raw XML into oos_ctx_schema
 // would only pollute the vector space with low-quality embeddings that
 // never help and sometimes hurt retrieval accuracy.
 func (s *SchemaStore) ProcessCTX(ctxID string) error {
@@ -73,10 +73,10 @@ func (s *SchemaStore) ProcessCTX(ctxID string) error {
 }
 
 // Backfill reads all rows from oos.ctx and processes any that are missing
-// from oos.oos_schema. Safe to call on every startup.
-// Returns nil if oos.ctx or oos.oos_schema do not exist yet (pre-seed state).
+// from oos.oos_ctx_schema. Safe to call on every startup.
+// Returns nil if oos.ctx or oos.oos_ctx_schema do not exist yet (pre-seed state).
 //
-// The query targets ctx rows whose id is not represented in oos_schema. Since
+// The query targets ctx rows whose id is not represented in oos_ctx_schema. Since
 // one ctx row can map to multiple context chunks (e.g. person → person_list,
 // person_detail) the LIKE clause catches both exact and prefixed matches.
 func (s *SchemaStore) Backfill() error {
@@ -84,7 +84,7 @@ func (s *SchemaStore) Backfill() error {
 		SELECT c.id
 		FROM oos.ctx c
 		WHERE NOT EXISTS (
-			SELECT 1 FROM oos.oos_schema os
+			SELECT 1 FROM oos.oos_ctx_schema os
 			WHERE os.context_name = c.id
 			   OR os.context_name LIKE c.id || '_%'
 		)
@@ -119,7 +119,7 @@ func (s *SchemaStore) Backfill() error {
 func (s *SchemaStore) All() ([]SchemaChunk, error) {
 	rows, err := s.db.Query(`
 		SELECT context_name, chunk
-		FROM oos.oos_schema
+		FROM oos.oos_ctx_schema
 		ORDER BY context_name
 	`)
 	if err != nil {
@@ -147,7 +147,7 @@ func (s *SchemaStore) Search(ctx context.Context, query string, n int) ([]Schema
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT context_name, chunk
-		FROM oos.oos_schema
+		FROM oos.oos_ctx_schema
 		WHERE embedding IS NOT NULL
 		ORDER BY embedding <=> $1::vector
 		LIMIT $2
@@ -168,7 +168,7 @@ func (s *SchemaStore) Search(ctx context.Context, query string, n int) ([]Schema
 	return results, rows.Err()
 }
 
-// upsertChunk embeds a single chunk and writes it to oos.oos_schema.
+// upsertChunk embeds a single chunk and writes it to oos.oos_ctx_schema.
 func (s *SchemaStore) upsertChunk(chunk SchemaChunk) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -179,7 +179,7 @@ func (s *SchemaStore) upsertChunk(chunk SchemaChunk) error {
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO oos.oos_schema (context_name, chunk, embedding, updated_at)
+		INSERT INTO oos.oos_ctx_schema (context_name, chunk, embedding, updated_at)
 		VALUES ($1, $2, $3::vector, now())
 		ON CONFLICT (context_name)
 		DO UPDATE SET chunk = $2, embedding = $3::vector, updated_at = now()
