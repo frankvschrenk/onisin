@@ -21,6 +21,9 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/frankvschrenk/fyne-codeedit"
+	"github.com/frankvschrenk/fyne-codeedit/format"
+
 	oosui "onisin.com/oos-common/ui"
 )
 
@@ -37,10 +40,13 @@ func buildCTXPanel(conn *Connection) fyne.CanvasObject {
 	state := &ctxPanelState{conn: conn}
 
 	// ── Editor ────────────────────────────────────────────────────────────
-	editor := widget.NewMultiLineEntry()
-	editor.Wrapping = fyne.TextWrapOff
-	editor.SetPlaceHolder("— keine CTX ausgewählt —")
-	editor.OnChanged = func(string) { state.dirty = true }
+	//
+	// ModalEditor starts in Preview with syntax-highlighted XML; the
+	// user presses Enter (or clicks) to enter Edit mode and Escape to
+	// jump back to Preview. OnChanged still fires for every keystroke
+	// while editing, so dirty tracking keeps working unchanged.
+	editor := codeedit.NewModalEditor(codeedit.LangXML)
+	editor.OnChanged(func(string) { state.dirty = true })
 
 	statusLabel := widget.NewLabel("")
 
@@ -130,12 +136,30 @@ func buildCTXPanel(conn *Connection) fyne.CanvasObject {
 			}, w)
 	})
 
+	// formatBtn re-indents the current XML buffer using beevik/etree
+	// via codeedit/format. Formatting does not touch the database —
+	// the user still has to hit Save afterwards, which is the usual
+	// editor-tool expectation.
+	formatBtn := widget.NewButtonWithIcon("Format", theme.ViewRefreshIcon(), func() {
+		if editor.Text() == "" {
+			return
+		}
+		pretty, err := format.FormatXML(editor.Text())
+		if err != nil {
+			statusLabel.SetText("Format: " + err.Error())
+			return
+		}
+		editor.SetText(pretty)
+		state.dirty = true
+		statusLabel.SetText("formatiert")
+	})
+
 	saveBtn := widget.NewButtonWithIcon("Speichern", theme.DocumentSaveIcon(), func() {
 		if state.current == "" {
 			statusLabel.SetText("nichts geladen")
 			return
 		}
-		if err := conn.Importer().ImportCTXFile(state.current, editor.Text); err != nil {
+		if err := conn.Importer().ImportCTXFile(state.current, editor.Text()); err != nil {
 			statusLabel.SetText("Speichern: " + err.Error())
 			return
 		}
@@ -168,7 +192,7 @@ func buildCTXPanel(conn *Connection) fyne.CanvasObject {
 			}, w)
 	})
 
-	toolbar := container.NewHBox(newBtn, saveBtn, deleteBtn)
+	toolbar := container.NewHBox(newBtn, formatBtn, saveBtn, deleteBtn)
 
 	// ── Layout ────────────────────────────────────────────────────────────
 	leftHeader := container.NewBorder(nil, nil, widget.NewLabel("CTX"), refreshBtn)

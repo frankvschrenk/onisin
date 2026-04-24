@@ -21,6 +21,9 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/frankvschrenk/fyne-codeedit"
+	"github.com/frankvschrenk/fyne-codeedit/format"
+
 	oosui "onisin.com/oos-common/ui"
 	"onisin.com/oos-dsl/dsl"
 )
@@ -38,10 +41,11 @@ func buildDSLPanel(conn *Connection) fyne.CanvasObject {
 	state := &dslPanelState{conn: conn}
 
 	// ── Editor ────────────────────────────────────────────────────────────
-	editor := widget.NewMultiLineEntry()
-	editor.Wrapping = fyne.TextWrapOff
-	editor.SetPlaceHolder("— keinen Screen ausgewählt —")
-	editor.OnChanged = func(string) { state.dirty = true }
+	//
+	// ModalEditor shows syntax-highlighted XML by default; Enter or
+	// click switches to Edit mode, Escape returns to Preview.
+	editor := codeedit.NewModalEditor(codeedit.LangXML)
+	editor.OnChanged(func(string) { state.dirty = true })
 
 	statusLabel := widget.NewLabel("")
 
@@ -155,18 +159,34 @@ func buildDSLPanel(conn *Connection) fyne.CanvasObject {
 			}, w)
 	})
 
+	// formatBtn re-indents the current XML buffer. Same behaviour as
+	// in the CTX panel — local to the editor, does not save.
+	formatBtn := widget.NewButtonWithIcon("Format", theme.ViewRefreshIcon(), func() {
+		if editor.Text() == "" {
+			return
+		}
+		pretty, err := format.FormatXML(editor.Text())
+		if err != nil {
+			statusLabel.SetText("Format: " + err.Error())
+			return
+		}
+		editor.SetText(pretty)
+		state.dirty = true
+		statusLabel.SetText("formatiert")
+	})
+
 	saveBtn := widget.NewButtonWithIcon("Speichern", theme.DocumentSaveIcon(), func() {
 		if state.current == "" {
 			statusLabel.SetText("nichts geladen")
 			return
 		}
-		if err := conn.Importer().ImportDSL(state.current, editor.Text); err != nil {
+		if err := conn.Importer().ImportDSL(state.current, editor.Text()); err != nil {
 			statusLabel.SetText("Speichern: " + err.Error())
 			return
 		}
 		state.dirty = false
 		statusLabel.SetText(fmt.Sprintf("gespeichert: oos.dsl[%s]", state.current))
-		renderPreview(editor.Text)
+		renderPreview(editor.Text())
 	})
 	saveBtn.Importance = widget.HighImportance
 
@@ -199,10 +219,10 @@ func buildDSLPanel(conn *Connection) fyne.CanvasObject {
 	})
 
 	previewBtn := widget.NewButtonWithIcon("Preview", theme.VisibilityIcon(), func() {
-		renderPreview(editor.Text)
+		renderPreview(editor.Text())
 	})
 
-	toolbar := container.NewHBox(newBtn, saveBtn, deleteBtn, previewBtn)
+	toolbar := container.NewHBox(newBtn, formatBtn, saveBtn, deleteBtn, previewBtn)
 
 	// ── Layout ────────────────────────────────────────────────────────────
 	leftHeader := container.NewBorder(nil, nil, widget.NewLabel("DSL"), refreshBtn)

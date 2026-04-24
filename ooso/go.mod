@@ -1,9 +1,10 @@
 module onisin.com/ooso
 
-go 1.23.0
+go 1.26.1
 
 require (
-	fyne.io/fyne/v2 v2.7.0
+	fyne.io/fyne/v2 v2.7.3
+	github.com/frankvschrenk/fyne-codeedit v0.0.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/lusingander/colorpicker v0.7.5
 	github.com/spf13/cobra v1.10.2
@@ -12,12 +13,14 @@ require (
 )
 
 require (
-	fyne.io/systray v1.11.1-0.20250603113521-ca66a66d8b58 // indirect
+	fyne.io/systray v1.12.0 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
-	github.com/beevik/etree v1.4.1 // indirect
+	github.com/alecthomas/chroma/v2 v2.23.1 // indirect
+	github.com/beevik/etree v1.6.0 // indirect
 	github.com/bojanz/currency v1.4.2 // indirect
 	github.com/cockroachdb/apd/v3 v3.2.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/fredbi/uri v1.1.1 // indirect
 	github.com/fyne-io/gl-js v0.2.0 // indirect
 	github.com/fyne-io/glfw-js v0.3.0 // indirect
@@ -26,7 +29,7 @@ require (
 	github.com/go-gl/gl v0.0.0-20231021071112-07e5d0ea2e71 // indirect
 	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20250301202403-da16c1255728 // indirect
 	github.com/go-text/render v0.2.0 // indirect
-	github.com/go-text/typesetting v0.3.0 // indirect
+	github.com/go-text/typesetting v0.3.3 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/hack-pad/go-indexeddb v0.3.2 // indirect
 	github.com/hack-pad/safejs v0.1.1 // indirect
@@ -56,3 +59,5 @@ replace onisin.com/oos-dsl => ../oos-dsl
 replace onisin.com/oos-common => ../oos-common
 
 replace onisin.com/oos-dsl-base => ../oos-dsl-base
+
+replace github.com/frankvschrenk/fyne-codeedit => ../codeedit

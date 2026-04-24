@@ -8,6 +8,7 @@
 # make compile-oosb    — build oosb (MCP bridge, retired — kept for reference)
 # make compile-oos-demo— build oos-demo (native process manager)
 # make package-oos-app — wrap oos_macos in OOS.app bundle (macOS only)
+# make package-ooso-app— wrap ooso_macos in Ooso.app bundle (macOS only)
 # make tidy            — go mod tidy across all modules
 # make release         — create GitHub release from dist/
 # make deploy          — build + push Docker images
@@ -31,8 +32,8 @@ LDFLAGS = -ldflags="-X 'main.VERSION=$(COMPILE_VERSION)'"
 export CGO_LDFLAGS = -Wl,-no_warn_duplicate_libraries
 
 .PHONY: compile compile-oos compile-ooso compile-oosb compile-oosp \
-        compile-oos-demo package-oos-app release deploy clean tidy help \
-        run-oosp-local check-oos-dsl check-oos-common
+        compile-oos-demo package-oos-app package-ooso-app release deploy \
+        clean tidy help run-oosp-local check-oos-dsl check-oos-common
 
 # -----------------------------------------------------------------------------
 # compile — all modules
@@ -110,6 +111,42 @@ endif
 	@mv $(DIST)/OOS.app/Contents/MacOS/oos_macos $(DIST)/OOS.app/Contents/MacOS/OOS
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable OOS" $(DIST)/OOS.app/Contents/Info.plist
 	@echo "✅ dist/OOS.app"
+
+# -----------------------------------------------------------------------------
+# package-ooso-app — wrap dist/ooso_macos in an Ooso.app bundle (macOS only)
+#
+# Same pattern as package-oos-app: reuse the universal binary produced by
+# compile-ooso, let fyne package build the bundle skeleton, then rename
+# the internal binary and patch CFBundleExecutable so `ps` and the Dock
+# both show "Ooso" instead of the platform-suffixed file name.
+#
+# Icon and bundle-id are deliberately parallel to the oos bundle — they
+# read as one product family rather than two unrelated apps.
+# -----------------------------------------------------------------------------
+
+package-ooso-app:
+ifneq ($(NATIVE_OS),darwin)
+	@echo "⚠️  package-ooso-app is macOS only (current: $(NATIVE_OS))"
+	@exit 1
+endif
+	@if [ ! -f $(DIST)/ooso_macos ]; then \
+		echo "⚙️  dist/ooso_macos missing — building first"; \
+		$(MAKE) compile-ooso; \
+	fi
+	@echo "📦 packaging Ooso.app — $(COMPILE_VERSION)"
+	@rm -rf $(DIST)/Ooso.app $(DIST)/ooso/Ooso.app
+	@cd ooso && fyne package \
+		--os darwin \
+		--name Ooso \
+		--app-id com.onisin.ooso \
+		--app-version $(COMPILE_VERSION) \
+		--icon assets/icon.icns \
+		--executable $(DIST)/ooso_macos \
+		--release
+	@mv ooso/Ooso.app $(DIST)/Ooso.app
+	@mv $(DIST)/Ooso.app/Contents/MacOS/ooso_macos $(DIST)/Ooso.app/Contents/MacOS/Ooso
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Ooso" $(DIST)/Ooso.app/Contents/Info.plist
+	@echo "✅ dist/Ooso.app"
 
 # -----------------------------------------------------------------------------
 # ooso — importer + designer (CGO, native)
@@ -266,6 +303,7 @@ help:
 	@echo "  make compile-oosb      — build oosb (MCP bridge)"
 	@echo "  make compile-oos-demo  — build oos-demo (native process manager)"
 	@echo "  make package-oos-app   — wrap oos_macos in OOS.app bundle (macOS)"
+	@echo "  make package-ooso-app  — wrap ooso_macos in Ooso.app bundle (macOS)"
 	@echo "  make tidy              — go mod tidy across all modules"
 	@echo "  make release           — create GitHub release"
 	@echo "  make deploy            — build + push Docker images"
