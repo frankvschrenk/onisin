@@ -124,6 +124,23 @@ func (s *PostgresStore) SetConfigXML(namespace, xml string) error {
 	return nil
 }
 
+// GetDSLMeta returns the xml column of the oos.oos_dsl_meta row
+// identified by namespace. Found is false when the row does not
+// exist — this typically means the seed has not run yet.
+func (s *PostgresStore) GetDSLMeta(namespace string) (string, bool, error) {
+	var xmlStr string
+	err := s.db.QueryRow(
+		`SELECT xml FROM oos.oos_dsl_meta WHERE namespace = $1`, namespace,
+	).Scan(&xmlStr)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("oos.oos_dsl_meta query: %w", err)
+	}
+	return xmlStr, true, nil
+}
+
 // GetCTXRaw returns the raw XML for a CTX context definition.
 func (s *PostgresStore) GetCTXRaw(id string) (string, bool, error) {
 	var xmlStr string

@@ -22,6 +22,12 @@ type ContextStore interface {
 	// by namespace.
 	SetConfigXML(namespace, xml string) error
 
+	// GetDSLMeta returns the xml column of the oos.oos_dsl_meta row
+	// keyed by namespace ('grammar' or 'enrichment'). Found is false
+	// when the row does not exist — DSLSchemaStore treats that as a
+	// pre-seed state and skips element chunk generation.
+	GetDSLMeta(namespace string) (xml string, found bool, err error)
+
 	GetEnvelope(contextName string, content map[string]any) (envelope map[string]any, err error)
 
 	// ContextsByCTXID returns the ContextAst slice produced by parsing the

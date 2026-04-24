@@ -2,24 +2,22 @@ package store
 
 // dsl_store.go — oos.oos_dsl_schema read/write operations.
 //
-// DSLSchemaStore manages DSL grammar chunks (elements) and DSL pattern
-// chunks (one per seeded screen) in a single table. The table is keyed
-// by a kind-prefixed id:
+// DSLSchemaStore builds one element chunk per DSL element by combining
+// the grammar (dsl.xsd) with the enrichment (dsl-enrichment.xml). Both
+// sources live in oos.oos_dsl_meta under the namespaces 'grammar' and
+// 'enrichment' respectively. The resulting chunks live in
+// oos.oos_dsl_schema with kind='element' and IDs like "element:field".
 //
-//   element:field
-//   element:section
-//   pattern:person_detail
-//   pattern:note_list
+// Rebuilds happen in two situations:
+//   - On startup via Backfill — catches any seed change that happened
+//     while oosp was down.
+//   - On pg_notify 'oos_dsl_meta' via the listener — catches live
+//     edits made by re-running --seed-internal against a hot oosp.
 //
-// Element chunks come from the XSD served out of oos.config (namespace
-// "schema.dsl"). They are regenerated on every backfill so a changed
-// grammar is picked up without restarting oosp — backfill is cheap
-// because the XSD is ~20 KB and produces 25–30 chunks.
-//
-// Pattern chunks come from oos.dsl. They are re-rendered on the fly
-// whenever the dsl_notify trigger fires. The ContextStore already knows
-// how to fetch a raw DSL row by id (GetDSL), so this store only needs
-// a DB handle for the oos_dsl_schema table itself.
+// Pattern chunks (kind='pattern') are reserved for future
+// combination-level snippets and are not populated today. The agent
+// loop composes full screens from multiple element retrievals
+// instead.
 
 import (
 	"context"
@@ -39,33 +37,52 @@ type DSLSchemaStore struct {
 }
 
 // NewDSLSchemaStore creates a DSLSchemaStore backed by the given
-// database, context store (for DSL XML fetching) and embed store.
+// database, context store (for DSL meta XML fetching) and embed store.
 func NewDSLSchemaStore(db *sql.DB, ctxStore ContextStore, embed EmbedStore) *DSLSchemaStore {
 	return &DSLSchemaStore{db: db, ctxStore: ctxStore, embed: embed}
 }
 
 // ── Processing ────────────────────────────────────────────────────────────────
 
-// ProcessElements regenerates every element chunk from the XSD stored
-// in oos.config under namespace "schema.dsl". Safe to call on every
-// startup; upsert makes it idempotent.
+// RebuildElements regenerates every element chunk from the grammar and
+// enrichment documents in oos.oos_dsl_meta. Safe to call on every
+// startup and on every notify; upsert makes it idempotent.
 //
-// A missing XSD row is not an error — it just means the seed has not
-// run yet. Callers will retry on the next backfill.
-func (s *DSLSchemaStore) ProcessElements() error {
-	xsd, found, err := s.ctxStore.GetConfigXML("schema.dsl")
+// A missing grammar row is not an error — it means the seed has not
+// run yet. A missing enrichment row is logged and the chunks are built
+// with grammar facts only, which is a degraded but still useful state.
+func (s *DSLSchemaStore) RebuildElements() error {
+	xsd, found, err := s.ctxStore.GetDSLMeta("grammar")
 	if err != nil {
-		return fmt.Errorf("fetch schema.dsl: %w", err)
+		return fmt.Errorf("fetch dsl grammar: %w", err)
 	}
 	if !found {
-		log.Println("[dsl-schema] schema.dsl not in oos.config — skipping element chunks")
+		log.Println("[dsl-schema] oos.oos_dsl_meta['grammar'] not seeded yet — skipping element rebuild")
 		return nil
 	}
 
-	chunks, err := BuildDSLElementChunks(xsd)
+	enrichment, found, err := s.ctxStore.GetDSLMeta("enrichment")
+	if err != nil {
+		return fmt.Errorf("fetch dsl enrichment: %w", err)
+	}
+	if !found {
+		log.Println("[dsl-schema] oos.oos_dsl_meta['enrichment'] not seeded — chunks will lack aliases/intent")
+		enrichment = ""
+	}
+
+	chunks, err := BuildDSLElementChunks(xsd, enrichment)
 	if err != nil {
 		return fmt.Errorf("element chunks: %w", err)
 	}
+
+	// Sweep stale rows: anything not produced by the current grammar
+	// (renamed elements, removed pattern chunks from the previous
+	// regime) would otherwise stay in the table with a now-orphaned
+	// id. The new ids are upserted right after, so this is safe.
+	if err := s.purgeStale(chunks); err != nil {
+		log.Printf("[dsl-schema] purge stale: %v", err)
+	}
+
 	for _, chunk := range chunks {
 		if err := s.upsertChunk(chunk); err != nil {
 			log.Printf("[dsl-schema] ❌ %s: %v", chunk.ID, err)
@@ -76,69 +93,30 @@ func (s *DSLSchemaStore) ProcessElements() error {
 	return nil
 }
 
-// ProcessPattern fetches the DSL row for the given screen id and
-// regenerates its pattern chunk.
-//
-// A missing row is not an error: oos.dsl rows can be deleted between
-// the trigger firing and the listener handling the notification. In
-// that case we silently drop the chunk too — the table should never
-// carry a pattern for a screen that no longer exists.
-func (s *DSLSchemaStore) ProcessPattern(screenID string) error {
-	xmlStr, found, err := s.ctxStore.GetDSL(screenID)
-	if err != nil {
-		return fmt.Errorf("fetch dsl %q: %w", screenID, err)
-	}
-	if !found {
-		return s.deleteChunk("pattern:" + screenID)
-	}
-
-	chunk, err := BuildDSLPatternChunk(screenID, xmlStr)
-	if err != nil {
-		return fmt.Errorf("pattern chunk %q: %w", screenID, err)
-	}
-	if chunk == nil {
+// purgeStale removes rows from oos.oos_dsl_schema whose id is not in
+// the current set. Catches renamed/removed elements and the legacy
+// 'pattern:*' rows from the pre-meta regime.
+func (s *DSLSchemaStore) purgeStale(current []DSLChunk) error {
+	if len(current) == 0 {
 		return nil
 	}
-	if err := s.upsertChunk(*chunk); err != nil {
-		return fmt.Errorf("upsert %q: %w", chunk.ID, err)
+	ids := make([]string, 0, len(current))
+	for _, c := range current {
+		ids = append(ids, c.ID)
 	}
-	log.Printf("[dsl-schema] ✅ %s", chunk.ID)
+	_, err := s.db.Exec(
+		`DELETE FROM oos.oos_dsl_schema WHERE id <> ALL($1)`,
+		pq.Array(ids),
+	)
+	if err != nil {
+		return fmt.Errorf("purge: %w", err)
+	}
 	return nil
 }
 
-// Backfill regenerates every element chunk from the XSD and every
-// pattern chunk for rows present in oos.dsl. Safe to call on every
-// startup — both paths are upsert-based.
-//
-// A missing oos.dsl (pre-seed state) is logged and treated as a no-op,
-// matching SchemaStore.Backfill's behaviour.
+// Backfill regenerates every element chunk. Called on oosp startup.
 func (s *DSLSchemaStore) Backfill() error {
-	if err := s.ProcessElements(); err != nil {
-		log.Printf("[dsl-schema] elements backfill: %v", err)
-	}
-
-	rows, err := s.db.Query(`SELECT id FROM oos.dsl ORDER BY id`)
-	if err != nil {
-		log.Printf("[dsl-schema] patterns backfill skipped (oos.dsl not ready): %v", err)
-		return nil
-	}
-	defer rows.Close()
-
-	count := 0
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			continue
-		}
-		if err := s.ProcessPattern(id); err != nil {
-			log.Printf("[dsl-schema] backfill pattern %s: %v", id, err)
-		}
-		count++
-	}
-	if count > 0 {
-		log.Printf("[dsl-schema] backfill: %d screens processed", count)
-	}
-	return nil
+	return s.RebuildElements()
 }
 
 // ── Retrieval ────────────────────────────────────────────────────────────────
@@ -231,26 +209,15 @@ func (s *DSLSchemaStore) upsertChunk(chunk DSLChunk) error {
 	return err
 }
 
-// deleteChunk removes a row by id. Used when a pattern's source DSL row
-// has been deleted — we don't want orphaned chunks polluting retrieval.
-func (s *DSLSchemaStore) deleteChunk(id string) error {
-	_, err := s.db.Exec(`DELETE FROM oos.oos_dsl_schema WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("delete %q: %w", id, err)
-	}
-	return nil
-}
-
 // ── Listener ──────────────────────────────────────────────────────────────────
 
-// ListenForDSLChanges blocks and listens on 'oos_dsl_notify'. Each
-// notification triggers a re-render of the affected pattern chunk.
-// Call in a goroutine. Stops when ctx is cancelled.
+// ListenForDSLChanges blocks and listens on 'oos_dsl_meta'. Each
+// notification triggers a full rebuild of every element chunk. Element
+// chunks are cross-cutting — a change to one enrichment entry can
+// affect the whole batch's ordering or wording — so we always rebuild
+// the full set rather than trying to target a single chunk.
 //
-// Element chunks don't have their own notify channel: the XSD changes
-// only when a developer edits dsl.xsd and runs --seed, which restarts
-// oosp via make/dev workflow anyway. Backfill at startup catches any
-// XSD drift that happened while oosp was down.
+// Call in a goroutine. Stops when ctx is cancelled.
 func (s *DSLSchemaStore) ListenForDSLChanges(ctx context.Context, dsn string) {
 	for {
 		if err := s.listenLoop(ctx, dsn); err != nil {
@@ -267,9 +234,10 @@ func (s *DSLSchemaStore) ListenForDSLChanges(ctx context.Context, dsn string) {
 	}
 }
 
-// listenLoop opens a dedicated pq listener connection and processes events.
-// Mirror of schema_store.listenLoop — same retry/keepalive semantics so
-// operators see consistent behaviour across the two listeners.
+// listenLoop opens a dedicated pq listener connection and processes
+// events. Mirror of schema_store.listenLoop — same retry/keepalive
+// semantics so operators see consistent behaviour across the two
+// listeners.
 func (s *DSLSchemaStore) listenLoop(ctx context.Context, dsn string) error {
 	listener := pq.NewListener(dsn,
 		2*time.Second, 30*time.Second,
@@ -279,12 +247,12 @@ func (s *DSLSchemaStore) listenLoop(ctx context.Context, dsn string) error {
 			}
 		},
 	)
-	if err := listener.Listen("oos_dsl_notify"); err != nil {
+	if err := listener.Listen("oos_dsl_meta"); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
 	defer listener.Close()
 
-	log.Println("[dsl-schema] ✅ listening on oos_dsl_notify")
+	log.Println("[dsl-schema] ✅ listening on oos_dsl_meta")
 
 	for {
 		select {
@@ -308,14 +276,12 @@ func (s *DSLSchemaStore) listenLoop(ctx context.Context, dsn string) error {
 	}
 }
 
-// handleNotify processes a single oos_dsl_notify payload.
-// Payload is the plain dsl id, e.g. "person_detail".
-func (s *DSLSchemaStore) handleNotify(dslID string) {
-	if dslID == "" {
-		return
-	}
-	log.Printf("[dsl-schema] notify: processing dsl %q", dslID)
-	if err := s.ProcessPattern(dslID); err != nil {
-		log.Printf("[dsl-schema] notify %s: %v", dslID, err)
+// handleNotify processes a single oos_dsl_meta payload. Payload is the
+// namespace that changed ('grammar' or 'enrichment'); we always do a
+// full rebuild regardless.
+func (s *DSLSchemaStore) handleNotify(namespace string) {
+	log.Printf("[dsl-schema] notify: %q changed, rebuilding element chunks", namespace)
+	if err := s.RebuildElements(); err != nil {
+		log.Printf("[dsl-schema] rebuild after notify %s: %v", namespace, err)
 	}
 }

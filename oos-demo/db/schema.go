@@ -251,22 +251,41 @@ func setupOOSTables(db *sql.DB) error {
 			ON oos.oos_ctx_schema USING ivfflat (embedding vector_cosine_ops)
 			WITH (lists = 10);
 
-		-- oos.oos_dsl_schema — DSL schema chunks for AI prompt injection.
-		-- Carries two shapes of chunks, distinguished by kind:
+		-- oos.oos_dsl_meta — vendor-shipped DSL metadata used to build
+		-- the element chunks below. Two rows, keyed by namespace:
 		--
-		--   'element'  — one row per DSL element type (field, section,
-		--                table, ...). Generated once from the dsl.xsd
-		--                grammar at oosp startup and after every XSD
-		--                change.
-		--   'pattern'  — one row per seeded *.dsl.xml screen. Captures
-		--                real-world usage so the AI engine can retrieve
-		--                concrete examples by intent, not just grammar.
-		--                Regenerated on oos.dsl changes via the trigger
-		--                below.
+		--   'grammar'     — the dsl.xsd XSD text (structural facts:
+		--                   elements, attributes, children, enums).
+		--   'enrichment'  — an XML document with one <element> per DSL
+		--                   element carrying the semantic layer the XSD
+		--                   cannot express: German aliases, intent,
+		--                   copy-pasteable example, AI hints.
 		--
-		-- Chunk IDs carry the kind as a prefix ("element:field",
-		-- "pattern:person_detail") so retrieval and targeted refresh
-		-- can filter on a simple LIKE without joining kind.
+		-- Both are seeded by --seed-internal (they ship with the binary,
+		-- not with the demo payload). oosp listens on 'oos_dsl_meta' and
+		-- rebuilds every element chunk when either row changes.
+		CREATE TABLE IF NOT EXISTS oos.oos_dsl_meta (
+			namespace  text        PRIMARY KEY CHECK (namespace IN ('grammar', 'enrichment')),
+			xml        text        NOT NULL,
+			updated_at timestamptz NOT NULL DEFAULT now()
+		);
+
+		-- oos.oos_dsl_schema — DSL schema chunks for AI retrieval.
+		-- One row per DSL element type (field, section, table, ...)
+		-- with kind='element'. The chunk body combines XSD grammar
+		-- facts with enrichment-layer aliases, intent and examples so
+		-- a single similarity query against the embedding column
+		-- surfaces both natural-language intent matches ("zwei Felder
+		-- nebeneinander") and structural matches ("section cols").
+		--
+		-- Rebuilt in full on any change to oos.oos_dsl_meta. The
+		-- kind='pattern' slot is kept in the CHECK constraint for
+		-- future combination-level chunks (full-screen skeletons,
+		-- form templates) but is not populated today.
+		--
+		-- Chunk IDs carry the kind as a prefix ("element:field") so
+		-- retrieval and targeted refresh can filter with a simple LIKE
+		-- without joining kind.
 		CREATE TABLE IF NOT EXISTS oos.oos_dsl_schema (
 			id         varchar(200) PRIMARY KEY,
 			kind       varchar(20)  NOT NULL CHECK (kind IN ('element', 'pattern')),
@@ -320,9 +339,9 @@ func setupOOSTables(db *sql.DB) error {
 			AFTER INSERT OR UPDATE ON oos.ctx
 			FOR EACH ROW EXECUTE FUNCTION oos.notify_ctx();
 
-		-- oosp listens on 'oos_dsl_notify' to rebuild the pattern chunks
-		-- for the changed screen. Only the id is sent — oosp fetches the
-		-- XML itself. Same pattern as oos_ctx_notify above.
+		-- oosp listens on 'oos_dsl_notify' for oos.dsl changes.
+		-- Historically used to rebuild pattern chunks; kept in place
+		-- for future consumers (e.g. reload a cached screen tree).
 		CREATE OR REPLACE FUNCTION oos.notify_dsl()
 		RETURNS TRIGGER LANGUAGE plpgsql AS $func$
 		BEGIN
@@ -335,6 +354,28 @@ func setupOOSTables(db *sql.DB) error {
 		CREATE TRIGGER dsl_notify
 			AFTER INSERT OR UPDATE ON oos.dsl
 			FOR EACH ROW EXECUTE FUNCTION oos.notify_dsl();
+
+		-- oosp listens on 'oos_dsl_meta' to rebuild every element chunk
+		-- in oos.oos_dsl_schema. Payload is the namespace that changed
+		-- ('grammar' or 'enrichment'); the listener always does a full
+		-- rebuild because element chunks are cross-cutting.
+		CREATE OR REPLACE FUNCTION oos.notify_dsl_meta()
+		RETURNS TRIGGER LANGUAGE plpgsql AS $func$
+		BEGIN
+			PERFORM pg_notify('oos_dsl_meta', NEW.namespace);
+			RETURN NEW;
+		END;
+		$func$;
+
+		DROP TRIGGER IF EXISTS dsl_meta_notify ON oos.oos_dsl_meta;
+		CREATE TRIGGER dsl_meta_notify
+			AFTER INSERT OR UPDATE ON oos.oos_dsl_meta
+			FOR EACH ROW EXECUTE FUNCTION oos.notify_dsl_meta();
+
+		DROP TRIGGER IF EXISTS dsl_meta_updated_at ON oos.oos_dsl_meta;
+		CREATE TRIGGER dsl_meta_updated_at
+			BEFORE UPDATE ON oos.oos_dsl_meta
+			FOR EACH ROW EXECUTE FUNCTION oos.set_updated_at();
 
 		-- updated_at triggers for ctx and dsl
 		DROP TRIGGER IF EXISTS ctx_updated_at ON oos.ctx;

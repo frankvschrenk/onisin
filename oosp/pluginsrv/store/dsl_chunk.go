@@ -2,29 +2,34 @@ package store
 
 // dsl_chunk.go — oos.oos_dsl_schema chunk rendering.
 //
-// Two shapes of chunks live in the same table, distinguished by kind:
+// One chunk per DSL element, stored with kind='element'. A chunk
+// combines two sources:
 //
-//  1. kind='element' — one chunk per XSD complexType that appears as a
-//     UIElement (box, section, field, tabs, accordion, table, …). Each
-//     chunk teaches the LLM which attributes an element accepts, which
-//     children are legal, and shows a tiny rendered example. Generated
-//     once at oosp startup from the grammar served out of oos.config
-//     (namespace "schema.dsl").
+//  1. Grammar (dsl.xsd)        — attribute names, required/optional,
+//                                 enum values, legal children. These
+//                                 are hard facts the Fyne renderer
+//                                 enforces.
+//  2. Enrichment (dsl-enrichment.xml) — German aliases, intent, a
+//                                 copy-pasteable example and AI hints.
+//                                 The soft layer that bridges natural-
+//                                 language UI requests to DSL shape.
 //
-//  2. kind='pattern' — one chunk per oos.dsl row. Each chunk describes
-//     a real, seed-approved screen: its id, title, which top-level
-//     elements it uses, which fields/widgets appear, and which bind
-//     paths. Regenerated on pg_notify via the dsl_notify trigger.
+// Both documents live in oos.oos_dsl_meta (rows 'grammar' and
+// 'enrichment') and are refreshed by --seed-internal. oosp listens on
+// pg_notify 'oos_dsl_meta' and rebuilds every element chunk on any
+// change.
 //
-// Both kinds are embedded into the same vector space so the retriever
-// can pull a mix of grammar and concrete usage for one query. IDs are
-// prefixed with the kind ("element:field", "pattern:person_detail")
-// so LIKE-based filtering works without touching the kind column.
+// kind='pattern' is reserved for future combination-level chunks
+// (full-screen skeletons, form templates) but is not populated today.
+// The agent loop in oosp uses multiple element retrievals instead.
 //
-// Design note on element chunks: the XSD is parsed with encoding/xml
-// against a minimal schema-aware struct. We intentionally don't import
-// a full XSD reflection library — the grammar only uses a handful of
-// xs:* features (complexType with attributes and either xs:sequence,
+// Chunk IDs are prefixed with the kind ("element:field") so LIKE-based
+// filtering works without touching the kind column.
+//
+// Design note on the XSD parser: encoding/xml against a minimal
+// schema-aware struct. We intentionally don't import a full XSD
+// reflection library — the grammar only uses a handful of xs:*
+// features (complexType with attributes and either xs:sequence,
 // xs:group, xs:choice), so a dedicated parser tailored to this file
 // is cheaper and more legible than pulling in a generic XSD crate.
 
@@ -33,8 +38,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	base "onisin.com/oos-dsl-base/base"
 )
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -133,23 +136,47 @@ type xsdEnumeration struct {
 	Value string `xml:"value,attr"`
 }
 
-// BuildDSLElementChunks parses a dsl.xsd document and returns one chunk
-// per complexType that represents a UIElement.
+// enrichmentDoc is the unmarshalling target for dsl-enrichment.xml.
+type enrichmentDoc struct {
+	XMLName  xml.Name             `xml:"dsl-enrichment"`
+	Elements []enrichmentElement  `xml:"element"`
+}
+
+// enrichmentElement carries the semantic layer for one DSL element.
+// All fields are optional — missing sections are simply skipped in
+// the rendered chunk.
+type enrichmentElement struct {
+	Name    string   `xml:"name,attr"`
+	Aliases []string `xml:"alias"`
+	Intent  string   `xml:"intent"`
+	Example string   `xml:"example"`
+	Hints   []string `xml:"hint"`
+}
+
+// BuildDSLElementChunks parses dsl.xsd + dsl-enrichment.xml and returns
+// one chunk per DSL element. The enrichment document may be empty
+// ("") — the chunks then carry only grammar facts, which is still
+// useful, just less effective at bridging natural-language intent.
 //
-// The root <screen> is included too, even though it isn't in the
-// UIElement group — it's the most important element and the LLM will
-// be asked about it first.
+// The root <screen> is included even though it isn't in the UIElement
+// group — it's the most important element and the LLM will be asked
+// about it first.
 //
-// Types used purely as containers for inline elements (Column under
+// Types used only as containers for inline elements (Column under
 // Table, Option under Choices, Span under RichText, Tab under Tabs,
 // AccordionItem under Accordion, TreeNode under Tree) are included as
 // their own chunks: the LLM often needs to emit them in isolation.
 //
-// Chunks are sorted by ID so backfill output is deterministic.
-func BuildDSLElementChunks(xsdText string) ([]DSLChunk, error) {
+// Chunks are sorted by ID so output is deterministic across rebuilds.
+func BuildDSLElementChunks(xsdText, enrichmentText string) ([]DSLChunk, error) {
 	var schema xsdSchema
 	if err := xml.Unmarshal([]byte(xsdText), &schema); err != nil {
 		return nil, fmt.Errorf("xsd parse: %w", err)
+	}
+
+	enrichmentIndex, err := indexEnrichment(enrichmentText)
+	if err != nil {
+		return nil, fmt.Errorf("enrichment parse: %w", err)
 	}
 
 	enumIndex := indexEnums(schema.SimpleTypes)
@@ -165,9 +192,10 @@ func BuildDSLElementChunks(xsdText string) ([]DSLChunk, error) {
 		if !targets[ct.Name] {
 			continue
 		}
-		chunk := renderElementChunk(ct, attrGroupIndex, enumIndex)
+		tag := xmlNameForComplexType(ct.Name)
+		chunk := renderElementChunk(ct, attrGroupIndex, enumIndex, enrichmentIndex[tag])
 		chunks = append(chunks, DSLChunk{
-			ID:   "element:" + xmlNameForComplexType(ct.Name),
+			ID:   "element:" + tag,
 			Kind: "element",
 			Text: chunk,
 		})
@@ -175,6 +203,27 @@ func BuildDSLElementChunks(xsdText string) ([]DSLChunk, error) {
 
 	sort.Slice(chunks, func(i, j int) bool { return chunks[i].ID < chunks[j].ID })
 	return chunks, nil
+}
+
+// indexEnrichment parses the enrichment XML and returns a map from
+// element tag name ("section", "field", ...) to its enrichment block.
+// An empty input is not an error — it yields an empty map.
+func indexEnrichment(enrichmentText string) (map[string]enrichmentElement, error) {
+	out := make(map[string]enrichmentElement)
+	if strings.TrimSpace(enrichmentText) == "" {
+		return out, nil
+	}
+	var doc enrichmentDoc
+	if err := xml.Unmarshal([]byte(enrichmentText), &doc); err != nil {
+		return nil, err
+	}
+	for _, e := range doc.Elements {
+		if e.Name == "" {
+			continue
+		}
+		out[e.Name] = e
+	}
+	return out, nil
 }
 
 // xmlNameForComplexType maps a complexType name (PascalCase in the XSD)
@@ -269,17 +318,39 @@ func indexAttributeGroups(groups []xsdAttributeGroup) map[string]xsdAttributeGro
 }
 
 // renderElementChunk produces the text body for one element chunk.
-// Layout mirrors the CTX chunks: one fact per line, stable order.
+// Layout follows the CTX chunk shape: one fact per line, stable
+// order, sections only emitted when they have content.
+//
+// Section order:
+//   Element:    the XML tag
+//   Alias:      German natural-language phrases (enrichment)
+//   Intent:     one-sentence description (enrichment)
+//   Attributes: XSD-derived list with required/enum/type hints
+//   Children:   XSD-derived content model description
+//   Example:    copy-pasteable snippet (enrichment)
+//   AI hints:   short rules of thumb (enrichment)
+//
+// Structural sections come from the XSD — those facts are enforced by
+// the renderer and must be accurate. Semantic sections come from
+// enrichment — those bridge natural-language intent to structure and
+// carry the judgment calls the grammar cannot express.
 func renderElementChunk(
 	ct xsdComplexType,
 	attrGroups map[string]xsdAttributeGroup,
 	enums map[string][]string,
+	enrich enrichmentElement,
 ) string {
 	var sb strings.Builder
 	tag := xmlNameForComplexType(ct.Name)
 
 	fmt.Fprintf(&sb, "Element: <%s>\n", tag)
-	fmt.Fprintf(&sb, "Purpose: %s\n", elementPurpose(tag))
+
+	if len(enrich.Aliases) > 0 {
+		fmt.Fprintf(&sb, "Alias: %s\n", strings.Join(enrich.Aliases, ", "))
+	}
+	if intent := strings.TrimSpace(enrich.Intent); intent != "" {
+		fmt.Fprintf(&sb, "Intent: %s\n", intent)
+	}
 
 	attrs := flattenAttributes(ct, attrGroups)
 	if len(attrs) > 0 {
@@ -289,13 +360,26 @@ func renderElementChunk(
 		}
 	}
 
-	children := describeChildren(ct)
-	if children != "" {
+	if children := describeChildren(ct); children != "" {
 		fmt.Fprintf(&sb, "Children: %s\n", children)
 	}
 
-	if ex := elementExample(tag); ex != "" {
-		fmt.Fprintf(&sb, "Example: %s\n", ex)
+	if ex := strings.TrimSpace(enrich.Example); ex != "" {
+		sb.WriteString("Example:\n")
+		for _, line := range strings.Split(ex, "\n") {
+			fmt.Fprintf(&sb, "  %s\n", line)
+		}
+	}
+
+	if len(enrich.Hints) > 0 {
+		sb.WriteString("AI hints:\n")
+		for _, h := range enrich.Hints {
+			h = strings.TrimSpace(h)
+			if h == "" {
+				continue
+			}
+			fmt.Fprintf(&sb, "  - %s\n", h)
+		}
 	}
 
 	return sb.String()
@@ -407,294 +491,3 @@ func joinAngled(names []string) string {
 	return strings.Join(parts, ", ")
 }
 
-// elementPurpose is a short, human-authored description of what each
-// element is for. Authored inline rather than harvested from the XSD
-// comments because the comments aren't surfaced by encoding/xml and
-// embedding-quality summaries are worth the small duplication.
-func elementPurpose(tag string) string {
-	switch tag {
-	case "screen":
-		return "Top-level screen. Every DSL document has exactly one."
-	case "box":
-		return "Horizontal or vertical stack of children. Primary layout primitive."
-	case "grid":
-		return "Fixed-column grid with configurable gap."
-	case "gridwrap":
-		return "Flow layout — children wrap based on min-width."
-	case "border":
-		return "Five-slot layout (top/bottom/left/right/center) driven by the child's position attribute."
-	case "center":
-		return "Centers its single child."
-	case "stack":
-		return "Z-stacks children on top of each other."
-	case "tabs":
-		return "Tab container — children are <tab>."
-	case "tab":
-		return "One tab inside <tabs>. Carries its own UI elements."
-	case "section":
-		return "Grouping container with an optional header label. cols+gap turn <field> children into a grid row."
-	case "card":
-		return "Framed panel with a title/subtitle pair."
-	case "accordion":
-		return "Collapsible sections — children are <accordion-item>."
-	case "accordion-item":
-		return "One foldable panel inside <accordion>. open=true makes it start expanded."
-	case "form":
-		return "Fyne widget.Form — label-left / input-right rows."
-	case "field":
-		return "Labelled input. The widget attribute picks entry/textarea/choices/radio/check/slider/progress. Default is entry."
-	case "entry":
-		return "Single-line text input."
-	case "textarea":
-		return "Multi-line text input with word wrap."
-	case "choices":
-		return "Single-select dropdown. options= names a meta source, or <option> children give inline values."
-	case "check":
-		return "Single checkbox. The label appears to the right of the box."
-	case "radio":
-		return "Radio group. orient=horizontal lays out across instead of down."
-	case "option":
-		return "One option inside <choices> or <radio>. Text is the label, value attribute is the underlying value."
-	case "slider":
-		return "Numeric slider with min/max/step."
-	case "progress":
-		return "Read-only progress bar driven by bind= or value=."
-	case "label":
-		return "Plain text label. style=bold/italic/mono for emphasis."
-	case "button":
-		return "Clickable button. action= names the event, style= picks an icon."
-	case "hyperlink":
-		return "Clickable link opening an external URL."
-	case "icon":
-		return "Theme-icon from the Fyne icon set."
-	case "richtext":
-		return "Formatted text. Either markdown=true with raw markdown, or <span> children with style= for inline emphasis."
-	case "span":
-		return "Inline segment inside <richtext>. style= picks heading, bold, italic, mono, codeblock, etc."
-	case "sep":
-		return "Horizontal separator line."
-	case "table":
-		return "Data table — rows from bind=, columns declared as <column> children."
-	case "column":
-		return "One column inside <table>. field= picks the row key, width= the pixel width."
-	case "list":
-		return "Single-column list bound to a JSON array."
-	case "tree":
-		return "Hierarchical tree — children are <node> elements with parent= pointers."
-	case "node":
-		return "One node inside <tree>. parent= points at the node's parent id (empty for roots)."
-	case "toolbar":
-		return "Top-level action bar — holds <button> and <sep> children."
-	}
-	return ""
-}
-
-// elementExample returns a tiny, copy-pasteable snippet for the element.
-// Not every element needs one — the purpose line plus the attribute list
-// is often enough. Examples are reserved for elements where the shape
-// is tricky (field's widget attribute, richtext's two modes, ...).
-func elementExample(tag string) string {
-	switch tag {
-	case "screen":
-		return `<screen id="person_detail" title="Person" save="true" delete="true">…</screen>`
-	case "section":
-		return `<section label="Address" cols="2" gap="4" p="3">…</section>`
-	case "field":
-		return `<field label="Role" bind="person.role" widget="choices" options="roles"/>`
-	case "table":
-		return `<table bind="rows" action="on_select"><column field="id" label="ID" width="60"/>…</table>`
-	case "tabs":
-		return `<tabs p="2"><tab label="Main">…</tab><tab label="More">…</tab></tabs>`
-	case "accordion":
-		return `<accordion p="3"><accordion-item label="Notes" open="true">…</accordion-item></accordion>`
-	case "richtext":
-		return `<richtext><span style="heading">Title</span><span>body</span></richtext>`
-	case "toolbar":
-		return `<toolbar><button action="on_new" style="add" label="New"/><sep/></toolbar>`
-	}
-	return ""
-}
-
-// ── Pattern chunks (from oos.dsl rows) ────────────────────────────────────────
-
-// BuildDSLPatternChunk renders a single pattern chunk from a seeded DSL
-// screen. Returns nil if the XML cannot be parsed — the caller logs and
-// moves on, since a broken screen is a seed problem, not a chunk problem.
-//
-// The chunk captures:
-//   - id and title (top-level discovery signals)
-//   - top-level structural elements actually used
-//   - every <field>/<column>/<check>/<textarea>/<choices>/<radio>/<slider>
-//     binding, so the LLM can match intent to concrete bind paths
-//   - actions and buttons, which are how the screen behaves
-//
-// Layout mirrors the element chunks: one fact per line, stable order.
-func BuildDSLPatternChunk(screenID, xmlText string) (*DSLChunk, error) {
-	root, err := base.Parse(strings.NewReader(xmlText))
-	if err != nil {
-		return nil, fmt.Errorf("dsl %q parse: %w", screenID, err)
-	}
-	if root == nil || root.Type != base.NodeScreen {
-		return nil, fmt.Errorf("dsl %q: root is not <screen>", screenID)
-	}
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "Screen: %s\n", screenID)
-	if title := root.Attr("title", ""); title != "" {
-		fmt.Fprintf(&sb, "Title: %s\n", title)
-	}
-	if label := root.Attr("label-color", ""); label != "" {
-		fmt.Fprintf(&sb, "Label color: %s\n", label)
-	}
-	flags := screenFlags(root)
-	if flags != "" {
-		fmt.Fprintf(&sb, "Flags: %s\n", flags)
-	}
-
-	dslPatternStructure(&sb, root)
-	dslPatternBindings(&sb, root)
-	dslPatternActions(&sb, root)
-
-	return &DSLChunk{
-		ID:   "pattern:" + screenID,
-		Kind: "pattern",
-		Text: sb.String(),
-	}, nil
-}
-
-// screenFlags collects the save/delete/exit boolean attributes from the
-// screen root and returns them as a compact comma-separated list so the
-// LLM can see at a glance what chrome the host app renders around the
-// screen.
-func screenFlags(root *base.Node) string {
-	var flags []string
-	for _, name := range []string{"save", "delete", "exit"} {
-		if root.AttrBool(name) {
-			flags = append(flags, name)
-		}
-	}
-	return strings.Join(flags, ", ")
-}
-
-// dslPatternStructure emits the sequence of direct children of the
-// screen, without recursing. That sequence is the signature of the
-// screen's overall shape — "toolbar, box, sep, tabs" is recognisably
-// the detail pattern; "toolbar, table" is the list pattern.
-func dslPatternStructure(sb *strings.Builder, root *base.Node) {
-	if len(root.Children) == 0 {
-		return
-	}
-	parts := make([]string, 0, len(root.Children))
-	for _, c := range root.Children {
-		parts = append(parts, string(c.Type))
-	}
-	fmt.Fprintf(sb, "Structure: %s\n", strings.Join(parts, " → "))
-}
-
-// dslPatternBindings walks the whole tree and emits one line per
-// element that carries a bind= attribute. Lines are kept compact:
-// kind, bind path, optional label, optional widget/format.
-//
-// Sorted by bind path so the output is deterministic even if the DSL
-// reorders its fields, which keeps embeddings stable.
-func dslPatternBindings(sb *strings.Builder, root *base.Node) {
-	type bindLine struct {
-		kind, bind, label, widget string
-	}
-	var lines []bindLine
-
-	var walk func(n *base.Node)
-	walk = func(n *base.Node) {
-		bind := n.Attr("bind", "")
-		if bind != "" {
-			lines = append(lines, bindLine{
-				kind:   string(n.Type),
-				bind:   bind,
-				label:  n.Attr("label", ""),
-				widget: n.Attr("widget", ""),
-			})
-		}
-		// <column> uses field= instead of bind= but carries the same
-		// "this column reads row[field]" meaning. Include it so the
-		// LLM can match table columns to underlying field names.
-		if n.Type == base.NodeColumn {
-			if f := n.Attr("field", ""); f != "" {
-				lines = append(lines, bindLine{
-					kind:  "column",
-					bind:  f,
-					label: n.Attr("label", ""),
-				})
-			}
-		}
-		for _, c := range n.Children {
-			walk(c)
-		}
-	}
-	walk(root)
-
-	if len(lines) == 0 {
-		return
-	}
-	sort.Slice(lines, func(i, j int) bool { return lines[i].bind < lines[j].bind })
-
-	sb.WriteString("Bindings:\n")
-	for _, l := range lines {
-		extra := ""
-		if l.widget != "" {
-			extra = " widget=" + l.widget
-		}
-		if l.label != "" {
-			fmt.Fprintf(sb, "  - %s %s (%s)%s\n", l.kind, l.bind, l.label, extra)
-		} else {
-			fmt.Fprintf(sb, "  - %s %s%s\n", l.kind, l.bind, extra)
-		}
-	}
-}
-
-// dslPatternActions emits every button's (action, style, label) so the
-// LLM knows what events a screen can produce. Independent from the
-// bindings pass because buttons don't carry bind=.
-func dslPatternActions(sb *strings.Builder, root *base.Node) {
-	type actionLine struct {
-		action, style, label string
-	}
-	var lines []actionLine
-
-	var walk func(n *base.Node)
-	walk = func(n *base.Node) {
-		if n.Type == base.NodeButton {
-			if act := n.Attr("action", ""); act != "" {
-				lines = append(lines, actionLine{
-					action: act,
-					style:  n.Attr("style", ""),
-					label:  n.Attr("label", ""),
-				})
-			}
-		}
-		for _, c := range n.Children {
-			walk(c)
-		}
-	}
-	walk(root)
-
-	if len(lines) == 0 {
-		return
-	}
-	sort.Slice(lines, func(i, j int) bool { return lines[i].action < lines[j].action })
-
-	sb.WriteString("Actions:\n")
-	for _, l := range lines {
-		extras := make([]string, 0, 2)
-		if l.style != "" {
-			extras = append(extras, "style="+l.style)
-		}
-		if l.label != "" {
-			extras = append(extras, "label="+l.label)
-		}
-		if len(extras) > 0 {
-			fmt.Fprintf(sb, "  - %s (%s)\n", l.action, strings.Join(extras, ", "))
-		} else {
-			fmt.Fprintf(sb, "  - %s\n", l.action)
-		}
-	}
-}
