@@ -37,6 +37,7 @@ var activeStore  store.ContextStore
 var activeVector store.VectorStore
 var activeEmbed  store.EmbedStore
 var activeSchema *store.SchemaStore
+var activeDSLSchema *store.DSLSchemaStore
 
 func Run() error {
 	applyConfig()
@@ -53,6 +54,7 @@ func Run() error {
 	initVectorStore()
 	initEmbedStore()
 	initSchemaStore()
+	initDSLSchemaStore()
 	
 	// Initialize event system (from server_enhanced.go)
 	initEventSystem()
@@ -209,6 +211,52 @@ func initSchemaStore() {
 	go activeSchema.ListenForCTXChanges(context.Background(), cfg.DSN)
 
 	log.Println("[oosp] ✅ schema store ready")
+}
+
+// initDSLSchemaStore wires up the DSLSchemaStore: regenerate element
+// chunks from the XSD in oos.config, backfill pattern chunks from
+// oos.dsl, then listen for oos_dsl_notify to keep patterns current.
+//
+// Shares the same embed store as the CTX schema pipeline so queries
+// can mix element and pattern chunks in a single vector space.
+func initDSLSchemaStore() {
+	if activeEmbed == nil {
+		log.Println("[oosp] dsl schema store skipped — no embed store configured")
+		return
+	}
+	if cfg.DSN == "" {
+		log.Println("[oosp] dsl schema store skipped — no DSN")
+		return
+	}
+	if activeStore == nil {
+		log.Println("[oosp] dsl schema store skipped — no context store")
+		return
+	}
+
+	// Dedicated DB connection for the DSL schema store. Keeping it
+	// separate from the CTX schema store's connection prevents one
+	// slow embed call from blocking the other listener.
+	dslDB, err := openDB(cfg.DSN)
+	if err != nil {
+		log.Printf("[oosp] ⚠️  dsl schema store db: %v", err)
+		return
+	}
+
+	activeDSLSchema = store.NewDSLSchemaStore(dslDB, activeStore, activeEmbed)
+
+	// Backfill in a goroutine so startup isn't blocked by embedding
+	// latency. The XSD element pass embeds ~30 short chunks, which
+	// with Ollama can take a few seconds per restart.
+	go func() {
+		if err := activeDSLSchema.Backfill(); err != nil {
+			log.Printf("[oosp] dsl schema backfill: %v", err)
+		}
+	}()
+
+	// Listen for DSL changes and re-embed the affected pattern.
+	go activeDSLSchema.ListenForDSLChanges(context.Background(), cfg.DSN)
+
+	log.Println("[oosp] ✅ dsl schema store ready")
 }
 
 func startRESTServer(addr string) error {
