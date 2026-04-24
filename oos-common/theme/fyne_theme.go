@@ -104,20 +104,41 @@ func (t *GlobalFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) c
 		// A soft cool-grey shadow that sits over any paper or slate
 		// without screaming. Fixed alpha, no theme attribute.
 		return color.NRGBA{R: 0, G: 0, B: 0, A: 0x18}
-	case fyneTheme.ColorNamePrimary,
-		fyneTheme.ColorNameFocus:
+	case fyneTheme.ColorNamePrimary:
 		if w := t.widget(KindButton); w != nil && w.Primary != "" {
 			return pick(w.Primary)
 		}
-	case fyneTheme.ColorNameSelection:
-		// Selection is rendered as a filled rectangle under the row/cell.
-		// The full-opacity brand colour drowns the text; Fyne's default
-		// uses ~30% alpha of the primary, we match that convention so
-		// the ink foreground still reads through.
+	case fyneTheme.ColorNameFocus:
+		// Fyne uses ColorNameFocus for two very different roles:
+		//   1. The focus ring on inputs, sliders, buttons — a thin
+		//      outline where the full primary colour looks right.
+		//   2. The background fill of a hovered menu item in
+		//      widget.Select and friends — a large area where the
+		//      full primary swallows the foreground text.
+		//
+		// widget.menuItem's renderer (see fyne v2 widget/menu_item.go)
+		// paints the hovered item with this slot, so we render it at
+		// ~15% alpha — same convention as ColorNameSelection — so the
+		// menu item's text stays legible.
 		if w := t.widget(KindButton); w != nil && w.Primary != "" {
 			c := ParseHex(w.Primary)
 			if nrgba, ok := c.(color.NRGBA); ok {
-				nrgba.A = 0x4d // 30%
+				nrgba.A = 0x26 // ~15%
+				return nrgba
+			}
+		}
+	case fyneTheme.ColorNameSelection:
+		// Selection is rendered as a filled rectangle under the row/cell
+		// and — in select/combo widgets — under the hovered dropdown
+		// item. 30% alpha over a dark brand indigo produced a mid-blue
+		// band that swallowed the near-black foreground text; dropping
+		// to ~15% keeps the highlight visible while the ink stays
+		// legible. Matches the "soft selection" convention used by
+		// Material Design (12%) and modern IDEs.
+		if w := t.widget(KindButton); w != nil && w.Primary != "" {
+			c := ParseHex(w.Primary)
+			if nrgba, ok := c.(color.NRGBA); ok {
+				nrgba.A = 0x26 // ~15%
 				return nrgba
 			}
 		}
@@ -291,18 +312,27 @@ func (t *WidgetFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) c
 		if fg != color.Transparent {
 			return fg
 		}
-	case fyneTheme.ColorNamePrimary,
-		fyneTheme.ColorNameFocus:
+	case fyneTheme.ColorNamePrimary:
 		if primary != color.Transparent {
 			return primary
 		}
-	case fyneTheme.ColorNameSelection:
-		// Match the global convention: full-opacity primary would
-		// drown the text under the selected row; 30% alpha keeps
-		// the ink legible.
+	case fyneTheme.ColorNameFocus:
+		// See GlobalFyneTheme.Color for why Focus is rendered at
+		// ~15% alpha: menu item hover fill uses this slot and the
+		// full primary would swallow the ink text.
 		if primary != color.Transparent {
 			if nrgba, ok := primary.(color.NRGBA); ok {
-				nrgba.A = 0x4d
+				nrgba.A = 0x26
+				return nrgba
+			}
+		}
+	case fyneTheme.ColorNameSelection:
+		// Match the global convention: ~15% alpha of the brand
+		// primary keeps the ink foreground clearly legible. See
+		// the matching case in GlobalFyneTheme for the rationale.
+		if primary != color.Transparent {
+			if nrgba, ok := primary.(color.NRGBA); ok {
+				nrgba.A = 0x26
 				return nrgba
 			}
 		}
