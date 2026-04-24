@@ -12,7 +12,7 @@ import (
 // Run startet die ooso GUI. Blockiert bis das Fenster geschlossen wird.
 func Run() {
 	a := app.NewWithID("ai.onisin.ooso")
-	w := a.NewWindow("ooso — OOS Synthetist")
+	w := a.NewWindow("Ooso — OOS Synthetist")
 	w.Resize(fyne.NewSize(1100, 720))
 	w.SetMaster()
 

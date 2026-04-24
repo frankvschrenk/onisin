@@ -41,6 +41,10 @@ export CGO_LDFLAGS = -Wl,-no_warn_duplicate_libraries
 
 compile: compile-oos compile-ooso compile-oosb compile-oosp compile-oos-demo
 	@echo $(COMPILE_VERSION) > $(VERSION_FILE)
+ifeq ($(NATIVE_OS),darwin)
+	@$(MAKE) --no-print-directory package-oos-app
+	@$(MAKE) --no-print-directory package-ooso-app
+endif
 	@echo ""
 	@echo "✅ dist/"
 	@ls -lh $(DIST)/
