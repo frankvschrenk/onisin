@@ -155,6 +155,22 @@ func (t *GlobalFyneTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) c
 				return nrgba
 			}
 		}
+	case fyneTheme.ColorNameWarning:
+		if t.xtheme.Colors.Warning != "" {
+			return pick(t.xtheme.Colors.Warning)
+		}
+	case fyneTheme.ColorNameError:
+		if t.xtheme.Colors.Error != "" {
+			return pick(t.xtheme.Colors.Error)
+		}
+	case fyneTheme.ColorNameSuccess:
+		if t.xtheme.Colors.Success != "" {
+			return pick(t.xtheme.Colors.Success)
+		}
+	case fyneTheme.ColorNameHyperlink:
+		if t.xtheme.Colors.Hyperlink != "" {
+			return pick(t.xtheme.Colors.Hyperlink)
+		}
 	}
 
 	return t.base.Color(name, variant)

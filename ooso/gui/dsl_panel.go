@@ -21,6 +21,7 @@ import (
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
+	oosui "onisin.com/oos-common/ui"
 	"onisin.com/oos-dsl/dsl"
 )
 
@@ -175,9 +176,10 @@ func buildDSLPanel(conn *Connection) fyne.CanvasObject {
 			return
 		}
 		w := fyne.CurrentApp().Driver().AllWindows()[0]
-		dialog.ShowConfirm(
+		oosui.ShowWarningConfirm(
 			"DSL löschen",
 			fmt.Sprintf("Screen oos.dsl[%s] wirklich löschen?", state.current),
+			"Löschen", "Abbrechen",
 			func(ok bool) {
 				if !ok {
 					return

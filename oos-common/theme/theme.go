@@ -6,6 +6,7 @@ package theme
 //
 //	<oos-theme variant="dark">
 //	  <sizes text="14" padding="4" inner-padding="8"/>
+//	  <colors warning="#d97706" error="#b91c1c" success="#16a34a"/>
 //	  <widget type="button"   primary="#3d6fd4" foreground="#ffffff" radius="6"/>
 //	  <widget type="entry"    background="#202023" border="#39393a"/>
 //	  <widget type="card"     background="#1e1e24"/>
@@ -78,11 +79,33 @@ type GlobalSizes struct {
 	InnerPadding string
 }
 
+// ── GlobalColors ──────────────────────────────────────────────────────────────
+
+// GlobalColors are semantic colours that are not tied to a specific widget
+// type. They drive Fyne's Warning/Error/Success/Hyperlink importance slots,
+// so a widget.Button with Importance=WarningImportance (or any RichText with
+// a hyperlink) picks up the themed value instead of Fyne's default.
+//
+// All fields are optional; an empty value falls through to the Fyne default
+// for the active variant.
+type GlobalColors struct {
+	Warning   string
+	Error     string
+	Success   string
+	Hyperlink string
+}
+
+// IsEmpty reports whether no global colour is set.
+func (c GlobalColors) IsEmpty() bool {
+	return c.Warning == "" && c.Error == "" && c.Success == "" && c.Hyperlink == ""
+}
+
 // ── OOSTheme ──────────────────────────────────────────────────────────────────
 
 type OOSTheme struct {
 	Variant string
 	Sizes   GlobalSizes
+	Colors  GlobalColors
 	Widgets []WidgetTheme
 }
 
@@ -101,6 +124,17 @@ const (
 	// Accent — warm amber for highlights and call-outs.
 	paletteAccent     = "#d97706"
 	paletteAccentSoft = "#fef3c7"
+
+	// Semantic colours — used by GlobalColors for Fyne's importance slots.
+	//
+	// Warning is the accent amber on purpose: it's loud enough to catch
+	// the eye on a destructive-confirm button and stays in-family with
+	// the progress-bar fill, so the user reads a consistent "something
+	// to notice" signal across the product.
+	paletteWarning   = paletteAccent
+	paletteError     = "#b91c1c"
+	paletteSuccess   = "#16a34a"
+	paletteHyperlink = "#1e40af"
 
 	// Ink — text colours, darkest to faintest.
 	paletteInk      = "#1f2937"
@@ -168,6 +202,12 @@ func defaultLightTheme() *OOSTheme {
 			Padding:      "6",
 			InnerPadding: "10",
 		},
+		Colors: GlobalColors{
+			Warning:   paletteWarning,
+			Error:     paletteError,
+			Success:   paletteSuccess,
+			Hyperlink: paletteHyperlink,
+		},
 	}
 	add := func(w WidgetTheme) { t.Widgets = append(t.Widgets, w) }
 
@@ -199,6 +239,12 @@ func defaultDarkTheme() *OOSTheme {
 			Text:         "14",
 			Padding:      "6",
 			InnerPadding: "10",
+		},
+		Colors: GlobalColors{
+			Warning:   paletteWarning,
+			Error:     paletteError,
+			Success:   paletteSuccess,
+			Hyperlink: paletteHyperlink,
 		},
 	}
 	add := func(w WidgetTheme) { t.Widgets = append(t.Widgets, w) }
@@ -252,6 +298,15 @@ func (t *OOSTheme) ToXML() (string, error) {
 		setAttrIfNotEmpty(sizes, "inner-padding", t.Sizes.InnerPadding)
 	}
 
+	// <colors> — semantic global colours (warning / error / success / hyperlink)
+	if !t.Colors.IsEmpty() {
+		colors := root.CreateElement("colors")
+		setAttrIfNotEmpty(colors, "warning", t.Colors.Warning)
+		setAttrIfNotEmpty(colors, "error", t.Colors.Error)
+		setAttrIfNotEmpty(colors, "success", t.Colors.Success)
+		setAttrIfNotEmpty(colors, "hyperlink", t.Colors.Hyperlink)
+	}
+
 	// <widget> Einträge
 	for _, w := range t.Widgets {
 		el := root.CreateElement("widget")
@@ -296,6 +351,16 @@ func ParseXML(raw string) (*OOSTheme, error) {
 			Text:         sizes.SelectAttrValue("text", ""),
 			Padding:      sizes.SelectAttrValue("padding", ""),
 			InnerPadding: sizes.SelectAttrValue("inner-padding", ""),
+		}
+	}
+
+	// <colors>
+	if colors := root.SelectElement("colors"); colors != nil {
+		t.Colors = GlobalColors{
+			Warning:   colors.SelectAttrValue("warning", ""),
+			Error:     colors.SelectAttrValue("error", ""),
+			Success:   colors.SelectAttrValue("success", ""),
+			Hyperlink: colors.SelectAttrValue("hyperlink", ""),
 		}
 	}
 

@@ -20,6 +20,8 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+
+	oosui "onisin.com/oos-common/ui"
 )
 
 // ctxPanelState holds the editor state for the CTX panel.
@@ -148,9 +150,10 @@ func buildCTXPanel(conn *Connection) fyne.CanvasObject {
 			return
 		}
 		w := fyne.CurrentApp().Driver().AllWindows()[0]
-		dialog.ShowConfirm(
+		oosui.ShowWarningConfirm(
 			"CTX löschen",
 			fmt.Sprintf("Eintrag oos.ctx[%s] wirklich löschen?", state.current),
+			"Löschen", "Abbrechen",
 			func(ok bool) {
 				if !ok {
 					return

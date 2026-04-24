@@ -15,6 +15,7 @@ import (
 
 	"onisin.com/oos-common/dsl"
 	oostheme "onisin.com/oos-common/theme"
+	oosui "onisin.com/oos-common/ui"
 	fynedsllib "onisin.com/oos-dsl/dsl"
 	"onisin.com/oos/helper"
 )
@@ -480,7 +481,7 @@ func (bw *boardWindow) executeDeleteWithConfirm(confirmMsg string) {
 		return
 	}
 	fyne.Do(func() {
-		dialog.ShowConfirm("Löschen bestätigen", confirmMsg, func(ok bool) {
+		oosui.ShowWarningConfirm("Löschen bestätigen", confirmMsg, "Ja", "Nein", func(ok bool) {
 			if !ok {
 				return
 			}
