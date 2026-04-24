@@ -50,6 +50,7 @@ func RegisterAll(s *server.MCPServer, reg *roots.Registry, logger *slog.Logger) 
 	registerSymbols(s, ctx)
 	registerGopls(s, ctx)
 	registerPostgres(s, ctx)
+	registerMemory(s, ctx)
 	registerBrowser(s, ctx)
 }
 
