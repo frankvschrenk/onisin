@@ -79,6 +79,16 @@ func NewModalEditor(language string) *ModalEditor {
 	return m
 }
 
+// StartInEditMode flips the initial mode to Edit. Call before the
+// widget is first laid out — typically right after NewModalEditor.
+// Useful for panels whose primary workflow is "paste content and
+// click Apply", where a Preview-first default makes the paste target
+// non-obvious.
+func (m *ModalEditor) StartInEditMode() {
+	m.mode = modeEdit
+	m.applyMode()
+}
+
 // SetText replaces the buffer contents in both the editor and the
 // preview. Safe to call from any goroutine — all widget mutation is
 // funnelled through the embedded widgets' thread-safe setters.
