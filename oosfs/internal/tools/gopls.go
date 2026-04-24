@@ -1,5 +1,6 @@
 // Tool: go_hover / go_definition / go_references / go_diagnostics /
-//       go_symbols / go_symbol_refs / go_package_diagnostics
+//       go_symbols / go_symbol_refs / go_package_diagnostics /
+//       go_workspace_diagnostics
 //
 // These tools front the gopls Language Server. They complement the
 // AST-based find_symbol/list_symbols (which run on a parsed file only)
@@ -11,7 +12,8 @@
 // go_symbol_refs and go_package_diagnostics combine AST-level name
 // resolution with gopls queries so common workflows ("who uses Foo?"
 // and "is this package clean?") finish in one tool call instead of
-// three.
+// three. go_workspace_diagnostics extends package diagnostics to an
+// entire subtree: "is this module clean?" in a single call.
 //
 // Positions are 1-based line/column as users naturally think of them
 // and as editors display them. The LSP internally uses 0-based
@@ -28,6 +30,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -127,6 +130,23 @@ func registerGopls(s *server.MCPServer, ctx *handlerCtx) {
 		mcp.WithBoolean("include_tests", mcp.Description("Include _test.go files (default: true)")),
 		mcp.WithNumber("wait_ms", mcp.Description("Max time in milliseconds to wait for each file's diagnostics (default: 2000)")),
 	), ctx.handleGoPackageDiagnostics)
+
+	s.AddTool(mcp.NewTool("go_workspace_diagnostics",
+		mcp.WithDescription(
+			"Run gopls diagnostics across every Go package under a "+
+				"directory tree. Recursively walks 'path', groups .go "+
+				"files by their containing directory (one directory = "+
+				"one package), and reports findings per package. Use as "+
+				"a quick 'is this module clean?' check after a sweeping "+
+				"refactor. Files are opened in batches to keep gopls "+
+				"responsive on large trees.",
+		),
+		mcp.WithToolAnnotation(readOnlyAnnotations("Go workspace diagnostics")),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Root directory to scan recursively")),
+		mcp.WithBoolean("include_tests", mcp.Description("Include _test.go files (default: true)")),
+		mcp.WithNumber("wait_ms", mcp.Description("Max time in milliseconds to wait for each file's diagnostics (default: 2000)")),
+		mcp.WithNumber("batch_size", mcp.Description("Number of files to open concurrently per batch (default: 20)")),
+	), ctx.handleGoWorkspaceDiagnostics)
 }
 
 // callDeadline is the default per-request timeout. gopls can be slow on
@@ -578,6 +598,182 @@ func (c *handlerCtx) handleGoPackageDiagnostics(ctx context.Context, req mcp.Cal
 		"count":     len(all),
 		"results":   all,
 	}), nil
+}
+
+// handleGoWorkspaceDiagnostics runs gopls diagnostics across every Go
+// package found under a directory tree. A package is every directory
+// containing at least one .go file (non-test unless include_tests=true).
+//
+// All packages share a single gopls client — the one rooted at the
+// workspace root covering the requested path. Files are opened in
+// batches to keep gopls responsive: opening thousands of files at once
+// stalls the type-checker; a small batch size (~20) lets it process
+// packages incrementally while the tool collects diagnostics from the
+// previous batch.
+//
+// The per-file wait_ms caps how long to wait for fresh diagnostics.
+// Total runtime is bounded by callDeadline.
+func (c *handlerCtx) handleGoWorkspaceDiagnostics(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	dir, err := req.RequireString("path")
+	if err != nil {
+		return c.errResult("go_workspace_diagnostics", err), nil
+	}
+	includeTests := optionalBool(req, "include_tests", true)
+	waitMs := optionalInt(req, "wait_ms", 2000)
+	batchSize := optionalInt(req, "batch_size", 20)
+	if batchSize < 1 {
+		batchSize = 20
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, callDeadline)
+	defer cancel()
+
+	abs, err := c.reg.Resolve(dir)
+	if err != nil {
+		return c.errResult("go_workspace_diagnostics", err), nil
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return c.errResult("go_workspace_diagnostics", err), nil
+	}
+	if !info.IsDir() {
+		return c.errResult("go_workspace_diagnostics", fmt.Errorf("not a directory: %s", abs)), nil
+	}
+
+	packages, err := goPackageDirs(abs, includeTests)
+	if err != nil {
+		return c.errResult("go_workspace_diagnostics", err), nil
+	}
+	if len(packages) == 0 {
+		return jsonResult(map[string]any{
+			"root":       abs,
+			"packages":   0,
+			"files":     0,
+			"count":     0,
+			"by_package": []any{},
+			"results":   []any{},
+		}), nil
+	}
+
+	root := c.goplsRootFor(abs)
+	if root == "" {
+		return c.errResult("go_workspace_diagnostics", fmt.Errorf("no allowed root contains %s", abs)), nil
+	}
+	cl, err := c.gopls.For(cctx, root)
+	if err != nil {
+		return c.errResult("go_workspace_diagnostics", err), nil
+	}
+
+	// Flatten into a single file list so batching is uniform across
+	// packages; track the originating package for the per-package
+	// summary in the response.
+	type fileEntry struct {
+		pkg  string
+		file string
+	}
+	var allFiles []fileEntry
+	for pkg, files := range packages {
+		for _, f := range files {
+			allFiles = append(allFiles, fileEntry{pkg: pkg, file: f})
+		}
+	}
+
+	perPackage := make(map[string]int, len(packages))
+	all := make([]map[string]any, 0)
+	totalFiles := 0
+
+	// Open in batches, then collect diagnostics for each batch before
+	// moving on. This spreads gopls's analysis work over time instead
+	// of asking it to hold thousands of open files simultaneously.
+	for start := 0; start < len(allFiles); start += batchSize {
+		end := start + batchSize
+		if end > len(allFiles) {
+			end = len(allFiles)
+		}
+		batch := allFiles[start:end]
+
+		for _, fe := range batch {
+			if err := cl.EnsureOpen(cctx, fe.file); err != nil {
+				c.logger.Warn("go_workspace_diagnostics: open failed",
+					"file", fe.file, "err", err)
+			}
+		}
+		for _, fe := range batch {
+			waitCtx, cancelWait := context.WithTimeout(cctx, time.Duration(waitMs)*time.Millisecond)
+			diags := cl.WaitForDiagnostics(waitCtx, fe.file)
+			cancelWait()
+			totalFiles++
+			for _, d := range diags {
+				all = append(all, map[string]any{
+					"package":  fe.pkg,
+					"file":     fe.file,
+					"severity": gopls.SeverityName(d.Severity),
+					"message":  d.Message,
+					"source":   d.Source,
+					"code":     d.Code,
+					"range":    rangeJSON(d.Range),
+				})
+				perPackage[fe.pkg]++
+			}
+		}
+	}
+
+	// Build a stable by_package summary sorted by package path so the
+	// output is deterministic across runs.
+	pkgNames := make([]string, 0, len(packages))
+	for pkg := range packages {
+		pkgNames = append(pkgNames, pkg)
+	}
+	sort.Strings(pkgNames)
+	byPackage := make([]map[string]any, 0, len(pkgNames))
+	for _, pkg := range pkgNames {
+		byPackage = append(byPackage, map[string]any{
+			"package": pkg,
+			"files":   len(packages[pkg]),
+			"count":   perPackage[pkg],
+		})
+	}
+
+	return jsonResult(map[string]any{
+		"root":       abs,
+		"packages":   len(packages),
+		"files":      totalFiles,
+		"count":      len(all),
+		"by_package": byPackage,
+		"results":    all,
+	}), nil
+}
+
+// goPackageDirs walks root recursively and returns a map of
+// package-directory → .go files in that directory. A "package" for the
+// purposes of diagnostics is any directory with at least one .go file.
+// Vendor, .git, and node_modules are skipped via heavyDirs.
+func goPackageDirs(root string, includeTests bool) (map[string][]string, error) {
+	out := make(map[string][]string)
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			// Don't abort the whole walk for an unreadable subtree;
+			// skip and continue.
+			return nil
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if p != root && (heavyDirs[name] || strings.HasPrefix(name, ".")) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".go") {
+			return nil
+		}
+		if !includeTests && strings.HasSuffix(d.Name(), "_test.go") {
+			return nil
+		}
+		dir := filepath.Dir(p)
+		out[dir] = append(out[dir], p)
+		return nil
+	})
+	return out, err
 }
 
 // symbolDecl is the position of one declaration found by AST scanning.

@@ -1,9 +1,11 @@
-// Tool: meta — project_info, git_status, git_diff, stat, allowed_roots
+// Tool: meta — project_info, git_status, git_diff, git_commit, git_push,
+//              stat, allowed_roots
 //
 // These are the tools that aren't in the upstream filesystem server but
 // pay for themselves within the first session of real work. project_info
 // answers "what am I looking at?"; git_status and git_diff plug me into
-// the same mental model a human developer has.
+// the same mental model a human developer has; git_commit and git_push
+// round out the end-to-end flow.
 //
 // Git integration is implemented by shelling out to the git binary. This
 // deliberately avoids pulling in go-git — git is always installed on a
@@ -88,6 +90,25 @@ func registerMeta(s *server.MCPServer, ctx *handlerCtx) {
 		mcp.WithBoolean("allow_empty", mcp.Description("Permit a commit that records no changes (default: false)")),
 	)
 	s.AddTool(gitCommitTool, ctx.handleGitCommit)
+
+	gitPushTool := mcp.NewTool("git_push",
+		mcp.WithDescription(
+			"Push already-committed history to a remote. Does NOT create "+
+				"a commit — use git_commit for that. By default pushes the "+
+				"current branch to its upstream; if the branch has no "+
+				"upstream yet and 'remote' is given, sets the upstream "+
+				"(equivalent to 'git push -u <remote> <branch>'). "+
+				"force_with_lease is available for history rewrites; "+
+				"plain --force is deliberately not exposed.",
+		),
+		mcp.WithToolAnnotation(destructiveAnnotations("Git push", false)),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Directory inside a git working tree")),
+		mcp.WithString("remote", mcp.Description("Remote name (default: the branch's upstream, or 'origin' if none)")),
+		mcp.WithString("branch", mcp.Description("Branch to push (default: current branch)")),
+		mcp.WithBoolean("force_with_lease", mcp.Description("Use --force-with-lease to overwrite the remote branch safely (default: false)")),
+		mcp.WithBoolean("tags", mcp.Description("Also push tags (--tags) (default: false)")),
+	)
+	s.AddTool(gitPushTool, ctx.handleGitPush)
 }
 
 func (c *handlerCtx) handleAllowedRoots(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -381,6 +402,123 @@ func (c *handlerCtx) handleGitCommit(ctx context.Context, req mcp.CallToolReques
 		result["push_output"] = strings.TrimSpace(pushOut)
 	}
 	return jsonResult(result), nil
+}
+
+// handleGitPush pushes already-committed history to a remote. It is
+// strictly a push — callers who also need to create a commit should use
+// git_commit with push=true. Keeping the two tools separate makes it
+// impossible to accidentally create an empty commit just to trigger a
+// push, a failure mode that already bit us once.
+//
+// Default behaviour mirrors a plain 'git push' from the shell: push the
+// current branch to its configured upstream. When 'remote' is given and
+// the branch has no upstream yet, this tool sets the upstream on the
+// first push ('git push -u <remote> <branch>') so that subsequent pushes
+// can run without arguments. force_with_lease is exposed because it is
+// the safe alternative to --force for legitimate history rewrites; plain
+// --force is not exposed.
+func (c *handlerCtx) handleGitPush(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	path, err := req.RequireString("path")
+	if err != nil {
+		return c.errResult("git_push", err), nil
+	}
+	remote := optionalString(req, "remote", "")
+	branch := optionalString(req, "branch", "")
+	forceWithLease := optionalBool(req, "force_with_lease", false)
+	pushTags := optionalBool(req, "tags", false)
+
+	abs, err := c.reg.Resolve(path)
+	if err != nil {
+		return c.errResult("git_push", err), nil
+	}
+	dir := dirOf(abs)
+
+	// Resolve the current branch — needed both for the response and as
+	// the default value when the caller didn't specify one.
+	currentBranch := ""
+	if out, err := runGit(dir, "rev-parse", "--abbrev-ref", "HEAD"); err == nil {
+		currentBranch = strings.TrimSpace(out)
+	}
+	if branch == "" {
+		branch = currentBranch
+	}
+
+	// Detect whether the target branch already has an upstream. This
+	// decides whether 'git push' without arguments would succeed, or
+	// whether we need to set one up with -u.
+	hasUpstream := false
+	if branch != "" {
+		if _, err := runGit(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{u}"); err == nil {
+			hasUpstream = true
+		}
+	}
+
+	args := []string{"push"}
+	if forceWithLease {
+		args = append(args, "--force-with-lease")
+	}
+	if pushTags {
+		args = append(args, "--tags")
+	}
+
+	switch {
+	case remote != "" && branch != "":
+		// Explicit remote+branch. If no upstream is configured yet,
+		// set it in the same push so future pushes work bare.
+		if !hasUpstream {
+			args = append(args, "-u")
+		}
+		args = append(args, remote, branch)
+	case remote != "":
+		// Remote without branch is an ambiguous request — the caller
+		// probably meant "push current branch to this remote".
+		if branch == "" {
+			return c.errResult("git_push", fmt.Errorf("cannot determine current branch; specify 'branch' explicitly")), nil
+		}
+		if !hasUpstream {
+			args = append(args, "-u")
+		}
+		args = append(args, remote, branch)
+	default:
+		// No remote given. If the branch has no upstream, fail loudly
+		// rather than silently using a default — the caller needs to
+		// decide.
+		if !hasUpstream {
+			return c.errResult(
+				"git_push",
+				fmt.Errorf("branch %q has no upstream; pass 'remote' (e.g. 'origin') to set one", branch),
+			), nil
+		}
+	}
+
+	out, err := runGit(dir, args...)
+	if err != nil {
+		return jsonResult(map[string]any{
+			"dir":     dir,
+			"branch":  currentBranch,
+			"args":    args,
+			"pushed":  false,
+			"error":   err.Error(),
+			"output":  strings.TrimSpace(out),
+		}), nil
+	}
+
+	// Resolve the pushed SHA after the fact so the caller can correlate
+	// the push with a specific commit. Best-effort: a resolve failure
+	// here does not change the success state.
+	sha := ""
+	if s, err := runGit(dir, "rev-parse", "HEAD"); err == nil {
+		sha = strings.TrimSpace(s)
+	}
+
+	return jsonResult(map[string]any{
+		"dir":    dir,
+		"branch": currentBranch,
+		"sha":    sha,
+		"args":   args,
+		"pushed": true,
+		"output": strings.TrimSpace(out),
+	}), nil
 }
 
 // findGitRoot walks up from dir looking for a .git entry.

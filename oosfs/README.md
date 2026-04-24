@@ -89,9 +89,28 @@ Restart Claude Desktop after editing.
 | `exec_read`     | Read incremental output from a streaming session     |
 | `exec_stop`     | Terminate a streaming session (SIGTERM → SIGKILL)    |
 | `which`         | Resolve an executable name against `$PATH`           |
+| `git_push`      | Push committed history to a remote (no commit step)  |
 | `apply_patch`   | Apply a unified diff (uses `git apply` under the hood) |
 | `find_symbol`   | Go-AST search for symbol definitions by name or regex |
 | `list_symbols`  | List all top-level symbols in a Go file or package   |
+| `go_hover`      | gopls hover: type + godoc at a position              |
+| `go_definition` | gopls go-to-definition                               |
+| `go_references` | gopls find-all-references across the workspace       |
+| `go_diagnostics`| gopls diagnostics for a file (errors, hints, unused) |
+| `go_symbols`    | gopls document-symbol tree (type-checker view)       |
+| `go_symbol_refs`| Find a Go symbol by name, return all usages via gopls |
+| `go_package_diagnostics` | gopls diagnostics across a package directory |
+| `go_workspace_diagnostics` | gopls diagnostics across an entire subtree |
+| `pg_query`      | Run a row-returning SELECT against the demo database |
+| `pg_exec`       | Run INSERT/UPDATE/DELETE/DDL against the demo database |
+| `pg_reset`      | Drop and recreate the demo database from `demo.toml` |
+| `browser_open`  | Navigate the shared headless browser to a URL        |
+| `browser_click` | Click an element matching a CSS selector             |
+| `browser_fill`  | Fill a form field identified by CSS selector         |
+| `browser_text`  | Read visible text from an element or the page body   |
+| `browser_wait`  | Wait until a selector becomes visible                |
+| `browser_screenshot` | Capture a full-page PNG                         |
+| `browser_close` | Close the browser session                            |
 
 ## Trusted mode
 
