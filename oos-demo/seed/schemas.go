@@ -1,11 +1,61 @@
-<?xml version="1.0" encoding="UTF-8"?>
+package seed
+
+// schemas.go — publishes the authoritative XSD grammars into oos.config.
+//
+// The CTX XSD (ctx.xsd in the repo root) is the grammar the synthesist
+// validates against when producing *.ctx.xml files. At runtime it is
+// served from oos.config under namespace "schema.ctx" so any client —
+// the eventual AI engine in particular — can fetch the current grammar
+// from a single authoritative source without parsing the filesystem.
+//
+// A later commit will add "schema.dsl" alongside, populated from a
+// dedicated dsl.xsd. The seed function below is written so adding the
+// DSL row is a one-line change.
+//
+// Storage layout mirrors seedThemes: one row per namespace, XSD text
+// in the xml column, data and json columns left empty.
+
+import (
+	"database/sql"
+	"fmt"
+)
+
+// seedSchemas upserts the built-in XSD grammars into oos.config.
+//
+// Idempotent — re-running refreshes the xml payload and bumps
+// updated_at via the config_updated_at trigger.
+func seedSchemas(db *sql.DB) error {
+	entries := []struct {
+		namespace string
+		xsd       string
+	}{
+		{"schema.ctx", ctxXSD},
+	}
+
+	for _, e := range entries {
+		if _, err := db.Exec(`
+			INSERT INTO oos.config (namespace, xml)
+			VALUES ($1, $2)
+			ON CONFLICT (namespace) DO UPDATE SET xml = $2, updated_at = now()
+		`, e.namespace, e.xsd); err != nil {
+			return fmt.Errorf("upsert %s: %w", e.namespace, err)
+		}
+	}
+	return nil
+}
+
+// ctxXSD is the authoritative grammar for *.ctx.xml and *.conf.xml.
+// Kept in sync with /ctx.xsd at the repo root — that file remains the
+// editable source, this constant is the seed payload.
+const ctxXSD = `<?xml version="1.0" encoding="UTF-8"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
            elementFormDefault="qualified">
 
   <!-- =========================================================
-       OOS Context Schema (oos.xsd)
-       Validiert .ctx.xml und .conf.xml Dateien die vom
-       Synthetist produziert oder manuell gepflegt werden.
+       OOS Context Schema (ctx.xsd)
+       Validates .ctx.xml and .conf.xml files produced by the
+       synthesist or hand-maintained. Served from oos.config
+       under namespace "schema.ctx" at runtime.
        ========================================================= -->
 
   <!-- Root-Element -->
@@ -299,3 +349,4 @@
   </xs:simpleType>
 
 </xs:schema>
+`

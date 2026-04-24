@@ -200,7 +200,7 @@ func (c *handlerCtx) handleProjectInfo(ctx context.Context, req mcp.CallToolRequ
 		{"Cargo.toml", "rust"},
 		{"Makefile", "make"},
 		{"setup.toml", "onisin"},
-		{"oos.xsd", "onisin-dsl"},
+		{"ctx.xsd", "onisin-ctx"},
 	}
 	for _, chk := range checks {
 		p := filepath.Join(dir, chk.file)
