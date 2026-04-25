@@ -66,6 +66,19 @@ func buildDSLPanel(conn *Connection) fyne.CanvasObject {
 		st := dsl.NewState()
 		builder := dsl.NewBuilder(st, state.current, nil)
 		screen := builder.Build(root)
+		// Skeleton screens (a freshly created <screen id="..."/> with no
+		// body yet) used to crash the renderer because the builder
+		// returned nil and VScroll de-referenced inside Layout. The
+		// builder no longer returns nil, but we still guard here so
+		// any future build path that yields nil shows a placeholder
+		// instead of taking the window down.
+		if screen == nil {
+			previewContainer.Objects = []fyne.CanvasObject{
+				widget.NewLabel("— leerer Screen —"),
+			}
+			previewContainer.Refresh()
+			return
+		}
 		previewContainer.Objects = []fyne.CanvasObject{
 			container.NewVScroll(screen),
 		}

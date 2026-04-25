@@ -734,13 +734,19 @@ func (b *Builder) buildChildren(node *Node) []fyne.CanvasObject {
 	return out
 }
 
+// vbox stacks the given nodes vertically and never returns nil — an
+// empty input still yields a valid empty *fyne.Container so callers
+// can hand the result straight to layouts (Stack, Border, VScroll)
+// without a nil-check. Returning nil here used to crash the renderer
+// when an empty <screen/> skeleton was previewed: VScroll wrapped a
+// nil content, and the first Refresh dereferenced inside Fyne's
+// scrollContainerRenderer.Layout.
 func (b *Builder) vbox(nodes []*Node) fyne.CanvasObject {
-	if len(nodes) == 0 {
-		return nil
-	}
 	children := make([]fyne.CanvasObject, 0, len(nodes))
 	for _, n := range nodes {
-		children = append(children, b.Build(n))
+		if obj := b.Build(n); obj != nil {
+			children = append(children, obj)
+		}
 	}
 	return container.NewVBox(children...)
 }
