@@ -14,6 +14,7 @@ package gui
 import (
 	"bytes"
 	"fmt"
+	"os"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -24,6 +25,8 @@ import (
 	"github.com/frankvschrenk/fyne-codeedit"
 	"github.com/frankvschrenk/fyne-codeedit/format"
 
+	"onisin.com/oos-chat/chat"
+	"onisin.com/oos-chat/modes"
 	oosui "onisin.com/oos-common/ui"
 	"onisin.com/oos-dsl/dsl"
 )
@@ -235,7 +238,37 @@ func buildDSLPanel(conn *Connection) fyne.CanvasObject {
 		renderPreview(editor.Text())
 	})
 
-	toolbar := container.NewHBox(newBtn, formatBtn, saveBtn, deleteBtn, previewBtn)
+	// aiBtn opens an oos-chat window in DSL mode. The mode's OnXML
+	// callback is wired here so the assistant's reply lands in the
+	// editor (which marks the buffer dirty and re-renders the preview).
+	// One window per click — fyne keeps multiple windows happily and
+	// the user can close them via the OS chrome.
+	aiBtn := widget.NewButtonWithIcon("AI", theme.ComputerIcon(), func() {
+		oospURL := os.Getenv("OOSP_URL")
+		if oospURL == "" {
+			oospURL = "http://localhost:9100"
+		}
+		mode := modes.NewDSLMode(modes.DSLConfig{
+			OOSPBaseURL: oospURL,
+			OnXML: func(xml string) error {
+				fyne.Do(func() {
+					editor.SetText(xml)
+					state.dirty = true
+					statusLabel.SetText("AI-Vorschlag übernommen — noch nicht gespeichert")
+					renderPreview(xml)
+				})
+				return nil
+			},
+		})
+		w, err := chat.OpenWindow(fyne.CurrentApp(), mode)
+		if err != nil {
+			statusLabel.SetText("AI: " + err.Error())
+			return
+		}
+		w.Show()
+	})
+
+	toolbar := container.NewHBox(newBtn, formatBtn, saveBtn, deleteBtn, previewBtn, aiBtn)
 
 	// ── Layout ────────────────────────────────────────────────────────────
 	leftHeader := container.NewBorder(nil, nil, widget.NewLabel("DSL"), refreshBtn)
