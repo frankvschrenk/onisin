@@ -27,6 +27,16 @@ COMPILE_VERSION := $(shell date +"%y.%-j.%H%M")
 NATIVE_OS       := $(shell go env GOOS)
 NATIVE_ARCH     := $(shell go env GOARCH)
 
+# APP_VERSION is the variant we feed to fyne package's --app-version,
+# which strictly requires three dot-separated unpadded integers
+# (x.y.z). COMPILE_VERSION carries an HHMM stamp like "26.115.0938"
+# whose zero-padded hour breaks that contract. We swap the time
+# component for "minutes since midnight", which is always 0..1439
+# with no leading zeros: 26.115.578 for 09:38, 26.115.1320 for 22:00.
+# The Go-linked main.VERSION keeps the human-readable HHMM stamp so
+# logs and `oos --version` are unchanged.
+APP_VERSION := $(shell date "+%y %-j %H %M" | awk '{ printf "%d.%d.%d", $$1, $$2, $$3*60+$$4 }')
+
 LDFLAGS = -ldflags="-X 'main.VERSION=$(COMPILE_VERSION)'"
 
 export CGO_LDFLAGS = -Wl,-no_warn_duplicate_libraries
@@ -107,7 +117,7 @@ endif
 		--os darwin \
 		--name OOS \
 		--app-id com.onisin.oos \
-		--app-version $(COMPILE_VERSION) \
+		--app-version $(APP_VERSION) \
 		--icon assets/icon.icns \
 		--executable $(DIST)/oos_macos \
 		--release
@@ -143,7 +153,7 @@ endif
 		--os darwin \
 		--name Ooso \
 		--app-id com.onisin.ooso \
-		--app-version $(COMPILE_VERSION) \
+		--app-version $(APP_VERSION) \
 		--icon assets/icon.icns \
 		--executable $(DIST)/ooso_macos \
 		--release
