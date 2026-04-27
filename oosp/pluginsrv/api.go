@@ -143,6 +143,18 @@ func SetTheme(variant, xml string) error {
 	return activeStore.SetConfigXML("theme."+variant, xml)
 }
 
+// GetDSLMeta returns the XML payload of an oos.oos_dsl_meta row. Valid
+// namespaces today are "grammar" (the dsl.xsd) and "enrichment" (the
+// human-written aliases/intent/examples used by the LLM retrieval
+// pipeline). Returns ("", false, nil) when the row is missing — callers
+// can decide whether that is fatal or just "not seeded yet".
+func GetDSLMeta(namespace string) (string, bool, error) {
+	if activeStore == nil {
+		return "", false, fmt.Errorf("store not initialised")
+	}
+	return activeStore.GetDSLMeta(namespace)
+}
+
 // SchemaAll returns all schema chunks without embedding search.
 // Used by oos at startup to inject the full schema into the AI prompt.
 func SchemaAll() ([]store.SchemaChunk, error) {

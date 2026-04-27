@@ -272,6 +272,7 @@ func startRESTServer(addr string) error {
 		VectorSearch:    VectorSearch,
 		GetTheme:        GetTheme,
 		SetTheme:        SetTheme,
+		GetDSLMeta:      GetDSLMeta,
 		SchemaSearch: func(query string, n int) (any, error) {
 			return SchemaSearch(query, n)
 		},

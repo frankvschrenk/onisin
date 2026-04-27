@@ -23,6 +23,7 @@ type Services struct {
 	VectorSearch    func(collection string, vector []float32, filter map[string]string, n uint64) (any, error)
 	GetTheme        func(variant string) (string, error)
 	SetTheme        func(variant, xml string) error
+	GetDSLMeta      func(namespace string) (xml string, found bool, err error)
 	SchemaSearch    func(query string, n int) (any, error)
 	SchemaAll       func() (any, error)
 	DSLSchemaSearch func(query string, n int) (any, error)
@@ -67,6 +68,7 @@ func (s *Server) Start() error {
 	e.GET("/schema/all", h.schemaAll)
 	e.POST("/dsl/schema/search", h.dslSchemaSearch)
 	e.GET("/dsl/schema/all", h.dslSchemaAll)
+	e.GET("/dsl/meta", h.dslMeta)
 
 	// Event System Routes
 	e.POST("/event/search", h.eventSearch)

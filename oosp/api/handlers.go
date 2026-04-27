@@ -545,3 +545,34 @@ func (h *handler) dslSchemaSearch(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, results)
 }
+
+
+// dslMeta serves GET /dsl/meta?ns={grammar|enrichment} and returns
+// the raw XML payload of the addressed oos.oos_dsl_meta row. Response
+// content type is application/xml — the body is the XML document
+// itself, not a JSON wrapper, because the payload is XML by nature
+// and clients (oos-builder, future tools) consume it as such.
+//
+// Missing rows return 404 with a JSON error so callers can distinguish
+// "namespace not seeded yet" from "service not configured" (503) and
+// "bad input" (400).
+func (h *handler) dslMeta(c echo.Context) error {
+	if h.svc.GetDSLMeta == nil {
+		return errJSON(c, http.StatusServiceUnavailable, "dsl meta not available")
+	}
+	ns := c.QueryParam("ns")
+	if ns == "" {
+		return errJSON(c, http.StatusBadRequest, "ns query parameter required")
+	}
+	if ns != "grammar" && ns != "enrichment" {
+		return errJSON(c, http.StatusBadRequest, "ns must be 'grammar' or 'enrichment'")
+	}
+	xml, found, err := h.svc.GetDSLMeta(ns)
+	if err != nil {
+		return errJSON(c, http.StatusInternalServerError, err.Error())
+	}
+	if !found {
+		return errJSON(c, http.StatusNotFound, "namespace not seeded: "+ns)
+	}
+	return c.Blob(http.StatusOK, "application/xml; charset=utf-8", []byte(xml))
+}
