@@ -1,0 +1,24 @@
+// person_list.view — view-dsl example
+// Tabular collection view over the person domain.
+
+view person_list "Personen" over person {
+
+  auto_refresh on person.changed
+
+  toolbar {
+    new "Neu" -> person_detail as tab
+    refresh "Aktualisieren"
+  }
+
+  table -> person.rows {
+    on_select -> person_detail bind=person.id as tab
+
+    column person.id        "ID"       width=60
+    column person.firstname "Vorname"  width=140
+    column person.lastname  "Nachname" width=140
+    column person.email     "E-Mail"   width=220
+    column person.city      "Stadt"    width=120
+    column person.age       "Alter"    width=70  format=number:0
+    column person.net_worth "Vermögen" width=110 format=currency
+  }
+}

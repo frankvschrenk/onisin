@@ -1,0 +1,10 @@
+<screen id="note_list" title="Notizen" scroll="false">
+  <toolbar>
+    <button action="on_new" style="add" label="Neu"/>
+  </toolbar>
+  <table bind="rows" action="on_select">
+    <column field="id"         label="ID"    width="60"/>
+    <column field="title"      label="Titel" width="300"/>
+    <column field="created_at" label="Datum" width="160"/>
+  </table>
+</screen>

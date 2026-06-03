@@ -1,0 +1,33 @@
+{
+  "name": "oos-dsls-ts",
+  "version": "1.0.0",
+  "description": "Onisin DSLs \u2014 Langium grammars, AST types, runtime mapper, and LLM-chunk renderer for the .domain and .view languages",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./types": "./src/types-only.ts",
+    "./renderers": "./src/renderers-only.ts",
+    "./generated": "./src/generated/index.ts",
+    "./services": "./src/services.ts",
+    "./monarch/domain": "./src/syntaxes/onisin-domain.monarch.ts",
+    "./monarch/view": "./src/syntaxes/onisin-view.monarch.ts",
+    "./monarch/event-schema": "./src/syntaxes/onisin-event-schema.monarch.ts",
+    "./textmate/domain": "./src/syntaxes/onisin-domain.tmLanguage.json",
+    "./textmate/view": "./src/syntaxes/onisin-view.tmLanguage.json",
+    "./textmate/event-schema": "./src/syntaxes/onisin-event-schema.tmLanguage.json"
+  },
+  "scripts": {
+    "lang:generate": "langium generate"
+  },
+  "dependencies": {
+    "langium": "^4.2.2",
+    "vscode-languageserver-types": "^3.17.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "langium-cli": "^4.2.1",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "onisin",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "dependencies": {
+    "@mantine/dates": "^9.2.1",
+    "dayjs": "^1.11.20"
+  }
+}

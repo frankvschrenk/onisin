@@ -1,0 +1,19 @@
+// note_list.view — view-dsl example
+
+view note_list "Notizen" over note {
+
+  auto_refresh on note.changed
+
+  toolbar {
+    new "Neu" -> note_detail as tab
+    refresh "Aktualisieren"
+  }
+
+  table -> note.rows {
+    on_select -> note_detail bind=note.id as tab
+
+    column note.id         "ID"    width=60
+    column note.title      "Titel" width=300
+    column note.created_at "Datum" width=160 format=datetime:short
+  }
+}

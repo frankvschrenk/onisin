@@ -1,0 +1,62 @@
+# Standalone workspace: this src-tauri is deliberately NOT a member of the
+# root /Users/frank/repro/onisin Rust workspace (services/ + crates/). The
+# empty [workspace] table below detaches it so the Tauri binary keeps its
+# own Cargo.lock and target/, exactly like the crypto reference app, and a
+# `cargo` run here does not try to compile the headless services.
+[workspace]
+
+[package]
+name = "oosd"
+version = "0.8.0"
+edition = "2021"
+authors = ["Frank von Schrenk"]
+
+[lib]
+# The desktop entry point lives in the lib so the mobile entry-point macro
+# can reuse it; main.rs is a thin shim that calls oosd_lib::run().
+name = "oosd_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.10.2", features = [] }
+tauri-plugin-opener = "2.5.3"
+tauri-plugin-store = "2.4.2"
+tauri-plugin-dialog = "2.6.0"
+tauri-plugin-fs = "2.4.5"
+tauri-plugin-os = "2"
+tauri-plugin-process = "2"
+
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+thiserror = "2.0.17"
+
+# list_models talks to an OpenAI-compatible /v1/models endpoint server-side
+# (no browser CORS, key stays out of fetch logs). rustls keeps the build
+# self-contained; json for response parsing.
+reqwest = { version = "0.12.4", default-features = false, features = ["json", "rustls-tls"] }
+
+# DB-admin commands (pipelines CRUD, event-context DDL) run sqlx against an
+# arbitrary target DB the user points at — postgres only, runtime queries
+# (no compile-time DB connection needed).
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
+
+# create_table_from_domain parses the .domain source and generates the DDL
+# locally (no NATS round-trip) via the shared DSL crate — path dep across the
+# workspace boundary, which is fine for a detached workspace.
+oos-dsls = { path = "../../../crates/oos-dsls" }
+
+# Pipeline-seed S3 upload (best-effort) signs RustFS/MinIO PUTs with AWS
+# Signature V2 (HMAC-SHA1) — a faithful port of the old seeder's s3AuthHeader.
+# httpdate formats the RFC-1123 Date header the signature is computed over.
+hmac = "0.12"
+sha1 = "0.10"
+base64 = "0.22"
+httpdate = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

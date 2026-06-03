@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["crates/oos-svc", "crates/oos-dsls", "services/oosai", "services/oosgql"]
+
+[workspace.package]
+edition = "2021"
+authors = ["Frank von Schrenk"]
+
+# Shared dependency versions. Member crates opt in with `.workspace = true`
+# so every service moves in lockstep on a single bump.
+[workspace.dependencies]
+anyhow = "1.0.102"
+async-nats = "0.49.0"
+chrono = { version = "0.4.44", default-features = false, features = ["clock"] }
+futures = "0.3.32"
+gethostname = "1.1.0"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["full"] }
+oos-svc = { path = "crates/oos-svc" }
+oos-dsls = { path = "crates/oos-dsls" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

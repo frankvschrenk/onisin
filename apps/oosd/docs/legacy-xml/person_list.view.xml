@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<screen id="person_list" title="Personen" scroll="false" cur="EUR" locale="de-DE">
+  <toolbar>
+    <button action="on_new" style="add" label="Neu"/>
+  </toolbar>
+  <table bind="rows" action="on_select">
+    <column field="id"        label="ID"       width="60"/>
+    <column field="firstname" label="Vorname"  width="140"/>
+    <column field="lastname"  label="Nachname" width="140"/>
+    <column field="email"     label="E-Mail"   width="220"/>
+    <column field="city"      label="Stadt"    width="120"/>
+    <column field="age"       label="Alter"    width="70"  format="num:0"/>
+    <column field="net_worth" label="Vermögen" width="110" format="@"/>
+  </table>
+</screen>

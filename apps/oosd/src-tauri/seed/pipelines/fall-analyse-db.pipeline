@@ -1,0 +1,28 @@
+pipeline "Fall-Analyse DB" {
+  source db schaeden from pipeline_documents
+  mode    context
+  llm     "gemma4:latest"
+
+  step where vorauswahl {
+    from schaeden
+    where {
+      { fall_nr: { _in: "SCH-2025-0067,SCH-2024-0001,SCH-2025-0008,SCH-2025-0031,SCH-2025-0035" } }
+    }
+    limit 5
+  }
+
+  step llm analyse {
+    from   vorauswahl
+    mode   per-row
+    system "Du bist ein erfahrener Versicherungsgutachter."
+    prompt "Prüfe diesen Schadensfall auf Ungereimtheiten und möglichen Betrug."
+  }
+
+  step llm zusammenfassung {
+    from   analyse
+    mode   aggregate
+    prompt "Erstelle eine Zusammenfassung aller auffälligen Punkte mit Risikoranking."
+  }
+
+  out editor
+}

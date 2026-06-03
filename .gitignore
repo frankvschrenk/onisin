@@ -1,0 +1,27 @@
+# ── Dependencies ──
+node_modules/
+
+# ── Rust / Cargo build output (root workspace + each detached src-tauri) ──
+target/
+
+# ── Frontend / build output ──
+dist/
+dist-web/
+build/
+
+# ── Tauri generated + app bundles & release artifacts ──
+gen/schemas/
+*.app
+*.dmg
+*.tar.zst
+
+# ── Logs & local env ──
+*.log
+.env
+.env.*
+!.env.example
+
+# ── OS / editor cruft ──
+.DS_Store
+.idea/
+.vscode/

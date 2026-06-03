@@ -1,0 +1,21 @@
+[package]
+name = "oosai"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "oosai"
+path = "src/main.rs"
+
+[dependencies]
+oos-svc = { workspace = true }
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

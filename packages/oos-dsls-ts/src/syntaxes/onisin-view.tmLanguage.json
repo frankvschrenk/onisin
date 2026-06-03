@@ -1,0 +1,61 @@
+{
+  "name": "onisin-view",
+  "scopeName": "source.onisin-view",
+  "fileTypes": [
+    ".view"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "name": "keyword.control.onisin-view",
+      "match": "\\b(accordion|as|auto_refresh|avatar|badge|bind|bold|button|card|check|color|cols|column|combobox|confirm|currency|date|daterange|datetime|default|delete|divider|email|exit|expand|false|file|focus|format|full|gap|grid|heading|href|icon|italic|item|json|label|lg|link|long|m|max|mb|md|medium|min|ml|modal|mono|mr|mt|multiselect|mx|my|new|number|on|on_edit|on_new|on_select|open|over|p|password|pb|percent|pl|placeholder|plain|pr|progress|pt|px|py|radio|rangeslider|rating|readonly|refresh|replace|richtext|row|save|scroll|section|select|sep|short|size|slider|sm|stack|step|subheading|switch|tab|table|tabs|tags|text|textarea|time|toolbar|true|view|width|window|xl|xs)\\b"
+    },
+    {
+      "name": "string.quoted.double.onisin-view",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "include": "#string-character-escape"
+        }
+      ]
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.onisin-view",
+          "begin": "/\\*",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.onisin-view"
+            }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.onisin-view"
+            }
+          }
+        },
+        {
+          "begin": "//",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.whitespace.comment.leading.onisin-view"
+            }
+          },
+          "end": "(?=$)",
+          "name": "comment.line.onisin-view"
+        }
+      ]
+    },
+    "string-character-escape": {
+      "name": "constant.character.escape.onisin-view",
+      "match": "\\\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\\{[0-9A-Fa-f]+\\}|[0-2][0-7]{0,2}|3[0-6][0-7]?|37[0-7]?|[4-7][0-7]?|.|$)"
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "name": "onisin-domain",
+  "scopeName": "source.onisin-domain",
+  "fileTypes": [
+    ".domain"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "name": "keyword.control.onisin-domain",
+      "match": "\\b(ai|aliases|belongs_to|bind|bool|date|datetime|delete|domain|eq|example|field|filterable|float|from|ge|gt|has_many|has_one|in|int|le|like|lt|meta|ne|options|order_by|permission|read|readonly|relation|string|text|via|write)\\b"
+    },
+    {
+      "name": "string.quoted.double.onisin-domain",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "include": "#string-character-escape"
+        }
+      ]
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.onisin-domain",
+          "begin": "/\\*",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.onisin-domain"
+            }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.onisin-domain"
+            }
+          }
+        },
+        {
+          "begin": "//",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.whitespace.comment.leading.onisin-domain"
+            }
+          },
+          "end": "(?=$)",
+          "name": "comment.line.onisin-domain"
+        }
+      ]
+    },
+    "string-character-escape": {
+      "name": "constant.character.escape.onisin-domain",
+      "match": "\\\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\\{[0-9A-Fa-f]+\\}|[0-2][0-7]{0,2}|3[0-6][0-7]?|37[0-7]?|[4-7][0-7]?|.|$)"
+    }
+  }
+}

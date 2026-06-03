@@ -1,0 +1,776 @@
+[
+  {
+    "fall_nr": "SCH-2024-0001",
+    "kategorie": "Einbruch",
+    "quelle": "db",
+    "titel": "Einbruch Elektronikmarkt Stuttgart",
+    "inhalt": "Schadensfall SCH-2024-0001 — Einbruch\nDatum: 14. Januar 2024, 02:17 Uhr\nOrt: Elektronikmarkt MediaPlus, Königstrasse 45, 70173 Stuttgart\n\nSachverhalt:\nIn der Nacht vom 13. auf den 14. Januar 2024 drangen unbekannte Täter durch\nein aufgehebeltes Kellerfenster in den Elektronikmarkt ein. Die Alarmanlage\nwurde durch Manipulation des Sicherungskastens deaktiviert. Entwendet wurden\n47 Laptops (Gesamtwert ca. 38.400 EUR), 23 Smartphones (ca. 18.200 EUR) und\nBargeld aus der Hauptkasse in Höhe von 2.340 EUR.\n\nBesonderheiten:\nDer Täter oder die Täter kannten offensichtlich die Position des Sicherungskastens\nund die Lagerstruktur. Kein Mitarbeiter war zum Tatzeitpunkt anwesend.\nKameraaufnahmen zeigen drei vermummte Personen, eine davon mit auffälliger\nroter Jacke. Fluchtwagen war ein weißer Sprinter ohne Kennzeichen.\n\nSchadenshöhe: 58.940 EUR\nVersicherungssumme beantragt: 58.940 EUR\nBearbeiter: Ingrid Hoffmann"
+  },
+  {
+    "fall_nr": "SCH-2024-0002",
+    "kategorie": "Wasserschaden",
+    "quelle": "db",
+    "titel": "Rohrbruch Wohnhaus München-Schwabing",
+    "inhalt": "Schadensfall SCH-2024-0002 — Wasserschaden\nDatum: 3. Februar 2024\nOrt: Mehrfamilienhaus, Leopoldstrasse 112, 80802 München\n\nSachverhalt:\nAm 3. Februar 2024 platzte im 3. Obergeschoss ein Heizungsrohr infolge\neines Frostschadens. Das austretende Wasser durchdrang die Decke und\nbeschädigte die darunterliegenden Wohnungen im 2. und 1. Obergeschoss.\nDer Schaden wurde erst am Morgen gegen 07:30 Uhr durch einen Mieter entdeckt.\n\nBetroffene Wohneinheiten:\n- Whg. 3.02 (Eigentümer): Parkett total, Tapeten, Elektrik Teilschaden\n- Whg. 2.02: Laminat, Mobiliar, feuchte Wände\n- Whg. 1.02: Feuchtigkeitsschaden Decke, Schimmelgefahr\n\nGutachter: Dipl.-Ing. Klaus Berger, Gutachten vom 10.02.2024\nSchadenshöhe: 34.700 EUR\nNotunterbringung Mieter: 1.200 EUR\nGesamtschaden: 35.900 EUR"
+  },
+  {
+    "fall_nr": "SCH-2024-0003",
+    "kategorie": "KFZ-Unfall",
+    "quelle": "db",
+    "titel": "Auffahrunfall A8 Karlsruhe — Verdacht auf Vortäuschung",
+    "inhalt": "Schadensfall SCH-2024-0003 — KFZ-Unfall / Betrugsverdacht\nDatum: 22. März 2024, 07:42 Uhr\nOrt: A8 Richtung München, km 297, Karlsruhe\n\nSachverhalt:\nHerr Thomas Grundmann (VN) meldete einen Auffahrunfall auf der A8.\nLaut Aussage fuhr ihm Frau Petra Voss auf. Schadensersatz beantragt:\nHeckschaden 4.200 EUR, Mietwagenkosten 840 EUR, Schmerzensgeld 1.500 EUR.\n\nAuffälligkeiten:\n- Unfallgegner Frau Voss war bereits an drei ähnlichen Unfällen beteiligt\n  (SCH-2023-0412, SCH-2022-0318, SCH-2021-0901) mit demselben Anwalt.\n- Alle drei Unfälle ereigneten sich auf Autobahnen am frühen Morgen.\n- Kein unabhängiger Zeuge vorhanden.\n- Schadensbilder stimmen nicht mit geschildertem Unfallhergang überein\n  (Gutachter: Dr. Maria Schlegel, 01.04.2024).\n- VN und Unfallgegnerin wohnen im selben Ortsteil.\n\nEmpfehlung Sachbearbeiter: Weitergabe an Sonderermittlung Betrug.\nStatus: Zahlung vorläufig zurückgestellt."
+  },
+  {
+    "fall_nr": "SCH-2024-0004",
+    "kategorie": "Brand",
+    "quelle": "db",
+    "titel": "Küchenbrand Einfamilienhaus Freiburg",
+    "inhalt": "Schadensfall SCH-2024-0004 — Brand\nDatum: 8. April 2024, 19:23 Uhr\nOrt: Einfamilienhaus, Rieselfeldallee 33, 79111 Freiburg\n\nSachverhalt:\nBrand in der Küche durch unbeaufsichtigtes Frittierfett. Die Flammen\nerfassten die Einbauküche vollständig und griffen auf den angrenzenden\nWohnbereich über. Feuerwehreinsatz ab 19:31 Uhr (8 Einsatzkräfte).\nBrand konnte um 20:15 Uhr unter Kontrolle gebracht werden.\n\nSchäden:\n- Einbauküche: Totalschaden (Neupreis 18.400 EUR, Zeitwert 11.200 EUR)\n- Wohnzimmer: Rußschaden, Möbel, Boden: ca. 9.800 EUR\n- Strukturschäden Decke und Wand: 6.200 EUR\n- Elektrische Anlage Teilbereich: 3.100 EUR\n- Brandmeldeanlage ausgelöst: funktionsfähig\n\nFamilie vorübergehend im Hotel untergebracht (14 Nächte à 145 EUR).\nGesamtschaden inkl. Unterbringung: 32.330 EUR"
+  },
+  {
+    "fall_nr": "SCH-2024-0005",
+    "kategorie": "Einbruch",
+    "quelle": "s3",
+    "s3_key": "schaeden/2024/SCH-2024-0005.txt",
+    "titel": "Einbruch Zahnarztpraxis Hamburg — Betrugsverdacht",
+    "inhalt": "Schadensfall SCH-2024-0005 — Einbruch / Betrugsverdacht\nDatum: gemeldet 19. Mai 2024\nOrt: Zahnarztpraxis Dr. Hans Weiler, Mönckebergstrasse 7, 20095 Hamburg\n\nSachverhalt laut VN:\nIn der Nacht vom 18. auf den 19. Mai 2024 sollen unbekannte Täter in die\nPraxis eingebrochen sein. Entwendet: 3 Laptops, 1 Röntgengerät (12.400 EUR),\nmedizinische Instrumente (4.800 EUR), Bargeld 1.200 EUR.\n\nWidersprüche bei Prüfung:\n- Kein Einbruchspuren an Türen oder Fenstern festgestellt (Polizei).\n- Alarmanlage war laut Protokoll nicht aktiviert (obwohl VN regelmäßige\n  Aktivierung versicherte).\n- Das angeblich entwendete Röntgengerät ist laut Hersteller-Datenbank\n  seit 2021 als defekt abgemeldet und hätte keinen Marktwert.\n- Kreditkartenabrechnungen zeigen Dr. Weiler am Abend vor dem Einbruch\n  in einem Casino mit Transaktionen von 3.200 EUR.\n\nStatus: Anzeige gegen VN wegen Verdacht auf Versicherungsbetrug erstattet.\nSchadenszahlung abgelehnt."
+  },
+  {
+    "fall_nr": "SCH-2024-0006",
+    "kategorie": "Wasserschaden",
+    "quelle": "s3",
+    "s3_key": "schaeden/2024/SCH-2024-0006.txt",
+    "titel": "Überschwemmung Kellergeschoss Düsseldorf",
+    "inhalt": "Schadensfall SCH-2024-0006 — Elementarschaden / Überschwemmung\nDatum: 21. Juni 2024\nOrt: Mehrfamilienhaus, Grafenberger Allee 88, 40237 Düsseldorf\n\nSachverhalt:\nNach Starkregen (62 mm in 3 Stunden laut DWD) trat Regenwasser durch\nden Lichtschacht in den Kellergang ein. Kellerboxen von 8 Parteien betroffen.\nGesamte Kellernutzfläche (ca. 180 m²) stand unter 40 cm Wasser.\n\nEinzelschäden (Zusammenfassung Gutachter):\n- Heizungsanlage (Baujahr 2019): Kompletttausch notwendig, 14.200 EUR\n- Waschmaschinen/Trockner 3 Parteien: 4.100 EUR\n- Lagerware/Möbel 8 Parteien: 8.900 EUR gesamt\n- Sanierungskosten (Trocknung, Desinfektion): 11.300 EUR\n\nGesamtschaden: 38.500 EUR\nElementarschadenversicherung greift: Eigenanteil 500 EUR\nAuszahlungsbetrag: 38.000 EUR"
+  },
+  {
+    "fall_nr": "SCH-2024-0007",
+    "kategorie": "KFZ-Unfall",
+    "quelle": "db",
+    "titel": "Parkplatzschaden Einkaufszentrum Hannover",
+    "inhalt": "Schadensfall SCH-2024-0007 — KFZ-Unfall Parkplatz\nDatum: 5. Juli 2024, ca. 14:30 Uhr\nOrt: Parkhaus Ernst-August-Galerie, Hannover\n\nSachverhalt:\nBeim Ausparken stieß Frau Sabine Krüger mit ihrem VW Passat gegen\nden ordnungsgemäß geparkten BMW 320i von Herrn Martin Becker.\nFremdschaden am BMW: Delle und Kratzer Fahrerseite, Anbauteile.\n\nDokumentation:\n- Fotos vom Unfallort vorhanden\n- Parkhaus-Kamera bestätigt Hergang\n- Polizei nicht vor Ort, Europäischer Unfallbericht ausgefüllt\n\nSchadenskalkulation:\n- Fremdschaden BMW (Gutachten DEKRA): 3.870 EUR\n- Wertminderung: 350 EUR\n- Mietwagen 4 Tage: 480 EUR\n- Sachverständigenkosten: 650 EUR\nGesamtregulierung: 5.350 EUR\nSelbstverschulden Frau Krüger: 100%"
+  },
+  {
+    "fall_nr": "SCH-2024-0008",
+    "kategorie": "Brand",
+    "quelle": "s3",
+    "s3_key": "schaeden/2024/SCH-2024-0008.txt",
+    "titel": "Lagerhallenbrand Logistikunternehmen Leipzig",
+    "inhalt": "Schadensfall SCH-2024-0008 — Großbrand Gewerbe\nDatum: 12. August 2024, 03:45 Uhr\nOrt: Logistikzentrum FastShip GmbH, Industriegebiet Leipzig-Nord\n\nSachverhalt:\nBrand in einer Lagerhalle (ca. 2.400 m²) ausgebrochen, Ursache laut\nBrandursachenermittlung: technischer Defekt an Ladestation für\nElektrostapler. Feuerwehr 3 Züge, Einsatzdauer 6 Stunden.\n\nSchäden:\n- Gebäudesubstanz (Totalverlust Halle B): 840.000 EUR\n- Lagerware Eigenbestand: 220.000 EUR\n- Lagerware Drittparteien (Haftpflicht): 180.000 EUR\n- Betriebsunterbrechung (geschätzt 3 Monate): 450.000 EUR\n- Aufräum- und Entsorgungskosten: 95.000 EUR\n\nGesamtschaden: ca. 1.785.000 EUR\nRückversicherung ab 500.000 EUR: Swiss Re\nErstzahlung Abschlag: 300.000 EUR genehmigt"
+  },
+  {
+    "fall_nr": "SCH-2024-0009",
+    "kategorie": "Einbruch",
+    "quelle": "db",
+    "titel": "Juwelierdiebstahl Köln Innenstadt",
+    "inhalt": "Schadensfall SCH-2024-0009 — Einbruch / Diebstahl\nDatum: 3. September 2024, 01:12 Uhr\nOrt: Juwelier Goldstein, Schildergasse 54, 50667 Köln\n\nSachverhalt:\nMittels eines gestohlenen Fahrzeugs wurde die Schaufensterscheibe\n(ESG 12mm) gerammt. Täter betraten das Geschäft und entwendeten\ndie ausgestellten Exponate aus drei Vitrinen binnen ca. 4 Minuten.\nAlarm ausgelöst, Polizei vor Ort nach 6 Minuten, Täter geflüchtet.\n\nEntwendete Waren (Inventarliste):\n- 23 Ringe (Brillanten, Platin/Gold): 67.400 EUR\n- 14 Armbanduhren (Luxusmarken): 89.200 EUR\n- 8 Halsketten und Anhänger: 22.100 EUR\n- Bargeld Tageseinnahmen: 3.400 EUR\n\nSachschaden:\n- Schaufensterscheibe und Rahmen: 8.900 EUR\n- Vitrineneinrichtung: 4.200 EUR\n\nGesamtschaden: 195.200 EUR\nEntwendete Waren versichert bis 250.000 EUR. Auszahlung nach Inventarprüfung."
+  },
+  {
+    "fall_nr": "SCH-2024-0010",
+    "kategorie": "KFZ-Unfall",
+    "quelle": "s3",
+    "s3_key": "schaeden/2024/SCH-2024-0010.txt",
+    "titel": "Geisterfahrer-Unfall A3 Frankfurt — Betrugsverdacht",
+    "inhalt": "Schadensfall SCH-2024-0010 — KFZ-Unfall / Schwerer Betrugsverdacht\nDatum: gemeldet 15. Oktober 2024\nOrt: A3, Höhe Frankfurter Kreuz\n\nSachverhalt laut VN:\nHerr Ralf Schuster meldete Totalschaden seines BMW M5 (Neupreis 112.000 EUR,\nZeitwert laut VN: 78.000 EUR) durch Kollision mit Geisterfahrer.\nUnfallgegner angeblich geflüchtet, kein Zeuge.\n\nKritische Prüfpunkte:\n- BMW M5 war laut CARFAX-Daten seit 4 Monaten mit Motorschaden\n  (Kolbenfresser) in verschiedenen Werkstätten, kein wirtschaftlicher\n  Reparaturauftrag erteilt.\n- Fahrzeug-Ortung GPS: Kein Signal für 72 Stunden vor gemeldetem Unfall.\n- VN hat laufende Privatinsolvenz seit März 2024.\n- Vorschaden 2022 (SCH-2022-0774): identisches Schadensbild, anderer VN.\n- Unfallaufnahme Polizei: keine Spurenlage die zu Geisterfahrtszenario passt.\n- Fahrzeugident-Nummer weicht um eine Stelle von Fahrzeugschein ab.\n\nStatus: Strafanzeige erstattet, Fahrzeug sichergestellt.\nZahlung abgelehnt."
+  },
+  {
+    "fall_nr": "SCH-2025-0001",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Berlin (0001)",
+    "inhalt": "Schadensfall SCH-2025-0001 — Einbruch\nOrt: Berlin\nSchadenshöhe: 1.200 EUR\n\nKellereinbruch, Werkzeug entwendet, Hebelspuren an Tür. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0002",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Hamburg (0002)",
+    "inhalt": "Schadensfall SCH-2025-0002 — Wasserschaden\nOrt: Hamburg\nSchadenshöhe: 1.337 EUR\n\nFrostschaden Außenwasserleitung, Rohrbruch Keller.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0003",
+    "kategorie": "Brand",
+    "titel": "Brand München (0003)",
+    "inhalt": "Schadensfall SCH-2025-0003 — Brand\nOrt: München\nSchadenshöhe: 1.474 EUR\n\nElektroverteiler Überhitzung, Dachstuhl angekokelt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0004",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Köln (0004)",
+    "inhalt": "Schadensfall SCH-2025-0004 — KFZ-Unfall\nOrt: Köln\nSchadenshöhe: 1.611 EUR\n\nAuffahrunfall Stau, minimaler Stoßstangenschaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0005",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Frankfurt (0005)",
+    "inhalt": "Schadensfall SCH-2025-0005 — Glasbruch\nOrt: Frankfurt\nSchadenshöhe: 1.748 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0006",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Stuttgart (0006)",
+    "inhalt": "Schadensfall SCH-2025-0006 — Einbruch\nOrt: Stuttgart\nSchadenshöhe: 1.885 EUR\n\nLadeneinbruch durch Dach, Kasse leer, Waren beschädigt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0007",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Düsseldorf (0007)",
+    "inhalt": "Schadensfall SCH-2025-0007 — Wasserschaden\nOrt: Düsseldorf\nSchadenshöhe: 2.022 EUR\n\nHauswasserwerk defekt, Schaden im Hauswirtschaftsraum.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0008",
+    "kategorie": "Brand",
+    "titel": "Brand Leipzig (0008)",
+    "inhalt": "Schadensfall SCH-2025-0008 — Brand\nOrt: Leipzig\nSchadenshöhe: 2.159 EUR\n\nAdventskranz Zimmerbrand, Sofa und Vorhänge verbrannt. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0009",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Dortmund (0009)",
+    "inhalt": "Schadensfall SCH-2025-0009 — KFZ-Unfall\nOrt: Dortmund\nSchadenshöhe: 2.296 EUR\n\nVorfahrtsverletzung Kreuzung, Seitenaufprall, leichter Sachschaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0010",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Essen (0010)",
+    "inhalt": "Schadensfall SCH-2025-0010 — Glasbruch\nOrt: Essen\nSchadenshöhe: 2.433 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0011",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Bremen (0011)",
+    "inhalt": "Schadensfall SCH-2025-0011 — Einbruch\nOrt: Bremen\nSchadenshöhe: 2.570 EUR\n\nFahrzeug aufgebrochen, Navi und Lenkrad entwendet.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0012",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Dresden (0012)",
+    "inhalt": "Schadensfall SCH-2025-0012 — Wasserschaden\nOrt: Dresden\nSchadenshöhe: 2.707 EUR\n\nWaschmaschine Leck, Laminat aufgequollen, Schimmelgefahr.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0013",
+    "kategorie": "Brand",
+    "titel": "Brand Berlin (0013)",
+    "inhalt": "Schadensfall SCH-2025-0013 — Brand\nOrt: Berlin\nSchadenshöhe: 2.844 EUR\n\nKurzschluss E-Roller Garage, Fahrzeug und Garagen Schaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0014",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Hamburg (0014)",
+    "inhalt": "Schadensfall SCH-2025-0014 — KFZ-Unfall\nOrt: Hamburg\nSchadenshöhe: 2.981 EUR\n\nUnfall enger Parkplatz Einkaufszentrum, Spiegel abgerissen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0015",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch München (0015)",
+    "inhalt": "Schadensfall SCH-2025-0015 — Glasbruch\nOrt: München\nSchadenshöhe: 3.118 EUR\n\nDachziegelfall auf Wintergartenverglasung. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0016",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Köln (0016)",
+    "inhalt": "Schadensfall SCH-2025-0016 — Einbruch\nOrt: Köln\nSchadenshöhe: 3.255 EUR\n\nSchuleinbruch Wochenende, IT-Ausstattung entwendet.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0017",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Frankfurt (0017)",
+    "inhalt": "Schadensfall SCH-2025-0017 — Wasserschaden\nOrt: Frankfurt\nSchadenshöhe: 3.392 EUR\n\nGeschirrspüler-Zulaufschlauch geplatzt, drei Etagen betroffen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0018",
+    "kategorie": "Brand",
+    "titel": "Brand Stuttgart (0018)",
+    "inhalt": "Schadensfall SCH-2025-0018 — Brand\nOrt: Stuttgart\nSchadenshöhe: 3.529 EUR\n\nGartengrill zu nah an Holzterasse, Brandflecken.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0019",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Düsseldorf (0019)",
+    "inhalt": "Schadensfall SCH-2025-0019 — KFZ-Unfall\nOrt: Düsseldorf\nSchadenshöhe: 3.666 EUR\n\nHagelschaden während Gewitter, 40 Dellen, Glasschaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0020",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Leipzig (0020)",
+    "inhalt": "Schadensfall SCH-2025-0020 — Glasbruch\nOrt: Leipzig\nSchadenshöhe: 3.803 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0021",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Dortmund (0021)",
+    "inhalt": "Schadensfall SCH-2025-0021 — Einbruch\nOrt: Dortmund\nSchadenshöhe: 3.940 EUR\n\nWohnungseinbruch tagsüber, Schmuck und Elektronik weg.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0022",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Essen (0022)",
+    "inhalt": "Schadensfall SCH-2025-0022 — Wasserschaden\nOrt: Essen\nSchadenshöhe: 4.077 EUR\n\nSpülmaschine defekt, Küche unter Wasser, Boden zerstört. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0023",
+    "kategorie": "Brand",
+    "titel": "Brand Bremen (0023)",
+    "inhalt": "Schadensfall SCH-2025-0023 — Brand\nOrt: Bremen\nSchadenshöhe: 4.214 EUR\n\nTechnischer Defekt Kühlschrank, Küche beschädigt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0024",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Dresden (0024)",
+    "inhalt": "Schadensfall SCH-2025-0024 — KFZ-Unfall\nOrt: Dresden\nSchadenshöhe: 4.351 EUR\n\nWildunfall B27, Reh, Frontschaden ca. 3.200 EUR.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0025",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Berlin (0025)",
+    "inhalt": "Schadensfall SCH-2025-0025 — Glasbruch\nOrt: Berlin\nSchadenshöhe: 4.488 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0026",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Hamburg (0026)",
+    "inhalt": "Schadensfall SCH-2025-0026 — Einbruch\nOrt: Hamburg\nSchadenshöhe: 4.625 EUR\n\nBüroeinbruch über Fenster, Laptops und Bargeld gestohlen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0027",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden München (0027)",
+    "inhalt": "Schadensfall SCH-2025-0027 — Wasserschaden\nOrt: München\nSchadenshöhe: 4.762 EUR\n\nDachrinne verstopft, Wasser ins Mauerwerk eingedrungen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0028",
+    "kategorie": "Brand",
+    "titel": "Brand Köln (0028)",
+    "inhalt": "Schadensfall SCH-2025-0028 — Brand\nOrt: Köln\nSchadenshöhe: 4.899 EUR\n\nKaminbrand, Rußrückstau in Wohnzimmer.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0029",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Frankfurt (0029)",
+    "inhalt": "Schadensfall SCH-2025-0029 — KFZ-Unfall\nOrt: Frankfurt\nSchadenshöhe: 5.036 EUR\n\nParkplatzrempler, Delle und Kratzer, Zeuge vorhanden. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0030",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Stuttgart (0030)",
+    "inhalt": "Schadensfall SCH-2025-0030 — Glasbruch\nOrt: Stuttgart\nSchadenshöhe: 5.173 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0031",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Düsseldorf (0031)",
+    "inhalt": "Schadensfall SCH-2025-0031 — Einbruch\nOrt: Düsseldorf\nSchadenshöhe: 5.310 EUR\n\nEinbruch Lager, Elektrowerkzeug ca. 8.000 EUR gestohlen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0032",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Leipzig (0032)",
+    "inhalt": "Schadensfall SCH-2025-0032 — Wasserschaden\nOrt: Leipzig\nSchadenshöhe: 5.447 EUR\n\nStarkregen, Keller vollgelaufen, Heizung beschädigt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0033",
+    "kategorie": "Brand",
+    "titel": "Brand Dortmund (0033)",
+    "inhalt": "Schadensfall SCH-2025-0033 — Brand\nOrt: Dortmund\nSchadenshöhe: 5.584 EUR\n\nKerze umgefallen, Tisch und Teppich verbrannt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0034",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Essen (0034)",
+    "inhalt": "Schadensfall SCH-2025-0034 — KFZ-Unfall\nOrt: Essen\nSchadenshöhe: 5.721 EUR\n\nDiebstahl Außenspiegel in der Innenstadt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0035",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Bremen (0035)",
+    "inhalt": "Schadensfall SCH-2025-0035 — Glasbruch\nOrt: Bremen\nSchadenshöhe: 5.858 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0036",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Dresden (0036)",
+    "inhalt": "Schadensfall SCH-2025-0036 — Einbruch\nOrt: Dresden\nSchadenshöhe: 5.995 EUR\n\nGartengeräteentnahme aus Schuppen, Schloss aufgeflext. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0037",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Berlin (0037)",
+    "inhalt": "Schadensfall SCH-2025-0037 — Wasserschaden\nOrt: Berlin\nSchadenshöhe: 6.132 EUR\n\nFrostschaden Außenwasserleitung, Rohrbruch Keller.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0038",
+    "kategorie": "Brand",
+    "titel": "Brand Hamburg (0038)",
+    "inhalt": "Schadensfall SCH-2025-0038 — Brand\nOrt: Hamburg\nSchadenshöhe: 6.269 EUR\n\nElektroverteiler Überhitzung, Dachstuhl angekokelt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0039",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall München (0039)",
+    "inhalt": "Schadensfall SCH-2025-0039 — KFZ-Unfall\nOrt: München\nSchadenshöhe: 6.406 EUR\n\nAuffahrunfall Stau, minimaler Stoßstangenschaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0040",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Köln (0040)",
+    "inhalt": "Schadensfall SCH-2025-0040 — Glasbruch\nOrt: Köln\nSchadenshöhe: 6.543 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0041",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Frankfurt (0041)",
+    "inhalt": "Schadensfall SCH-2025-0041 — Einbruch\nOrt: Frankfurt\nSchadenshöhe: 6.680 EUR\n\nKellereinbruch, Werkzeug entwendet, Hebelspuren an Tür.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0042",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Stuttgart (0042)",
+    "inhalt": "Schadensfall SCH-2025-0042 — Wasserschaden\nOrt: Stuttgart\nSchadenshöhe: 6.817 EUR\n\nHauswasserwerk defekt, Schaden im Hauswirtschaftsraum.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0043",
+    "kategorie": "Brand",
+    "titel": "Brand Düsseldorf (0043)",
+    "inhalt": "Schadensfall SCH-2025-0043 — Brand\nOrt: Düsseldorf\nSchadenshöhe: 6.954 EUR\n\nAdventskranz Zimmerbrand, Sofa und Vorhänge verbrannt. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0044",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Leipzig (0044)",
+    "inhalt": "Schadensfall SCH-2025-0044 — KFZ-Unfall\nOrt: Leipzig\nSchadenshöhe: 7.091 EUR\n\nVorfahrtsverletzung Kreuzung, Seitenaufprall, leichter Sachschaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0045",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Dortmund (0045)",
+    "inhalt": "Schadensfall SCH-2025-0045 — Glasbruch\nOrt: Dortmund\nSchadenshöhe: 7.228 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0046",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Essen (0046)",
+    "inhalt": "Schadensfall SCH-2025-0046 — Einbruch\nOrt: Essen\nSchadenshöhe: 7.365 EUR\n\nLadeneinbruch durch Dach, Kasse leer, Waren beschädigt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0047",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Bremen (0047)",
+    "inhalt": "Schadensfall SCH-2025-0047 — Wasserschaden\nOrt: Bremen\nSchadenshöhe: 7.502 EUR\n\nWaschmaschine Leck, Laminat aufgequollen, Schimmelgefahr.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0048",
+    "kategorie": "Brand",
+    "titel": "Brand Dresden (0048)",
+    "inhalt": "Schadensfall SCH-2025-0048 — Brand\nOrt: Dresden\nSchadenshöhe: 7.639 EUR\n\nKurzschluss E-Roller Garage, Fahrzeug und Garagen Schaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0049",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Berlin (0049)",
+    "inhalt": "Schadensfall SCH-2025-0049 — KFZ-Unfall\nOrt: Berlin\nSchadenshöhe: 7.776 EUR\n\nUnfall enger Parkplatz Einkaufszentrum, Spiegel abgerissen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0050",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Hamburg (0050)",
+    "inhalt": "Schadensfall SCH-2025-0050 — Glasbruch\nOrt: Hamburg\nSchadenshöhe: 7.913 EUR\n\nDachziegelfall auf Wintergartenverglasung. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0051",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch München (0051)",
+    "inhalt": "Schadensfall SCH-2025-0051 — Einbruch\nOrt: München\nSchadenshöhe: 8.050 EUR\n\nFahrzeug aufgebrochen, Navi und Lenkrad entwendet.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0052",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Köln (0052)",
+    "inhalt": "Schadensfall SCH-2025-0052 — Wasserschaden\nOrt: Köln\nSchadenshöhe: 8.187 EUR\n\nGeschirrspüler-Zulaufschlauch geplatzt, drei Etagen betroffen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0053",
+    "kategorie": "Brand",
+    "titel": "Brand Frankfurt (0053)",
+    "inhalt": "Schadensfall SCH-2025-0053 — Brand\nOrt: Frankfurt\nSchadenshöhe: 8.324 EUR\n\nGartengrill zu nah an Holzterasse, Brandflecken.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0054",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Stuttgart (0054)",
+    "inhalt": "Schadensfall SCH-2025-0054 — KFZ-Unfall\nOrt: Stuttgart\nSchadenshöhe: 8.461 EUR\n\nHagelschaden während Gewitter, 40 Dellen, Glasschaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0055",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Düsseldorf (0055)",
+    "inhalt": "Schadensfall SCH-2025-0055 — Glasbruch\nOrt: Düsseldorf\nSchadenshöhe: 8.598 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0056",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Leipzig (0056)",
+    "inhalt": "Schadensfall SCH-2025-0056 — Einbruch\nOrt: Leipzig\nSchadenshöhe: 8.735 EUR\n\nSchuleinbruch Wochenende, IT-Ausstattung entwendet.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0057",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Dortmund (0057)",
+    "inhalt": "Schadensfall SCH-2025-0057 — Wasserschaden\nOrt: Dortmund\nSchadenshöhe: 8.872 EUR\n\nSpülmaschine defekt, Küche unter Wasser, Boden zerstört. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0058",
+    "kategorie": "Brand",
+    "titel": "Brand Essen (0058)",
+    "inhalt": "Schadensfall SCH-2025-0058 — Brand\nOrt: Essen\nSchadenshöhe: 9.009 EUR\n\nTechnischer Defekt Kühlschrank, Küche beschädigt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0059",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Bremen (0059)",
+    "inhalt": "Schadensfall SCH-2025-0059 — KFZ-Unfall\nOrt: Bremen\nSchadenshöhe: 9.146 EUR\n\nWildunfall B27, Reh, Frontschaden ca. 3.200 EUR.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0060",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Dresden (0060)",
+    "inhalt": "Schadensfall SCH-2025-0060 — Glasbruch\nOrt: Dresden\nSchadenshöhe: 9.283 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0061",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Berlin (0061)",
+    "inhalt": "Schadensfall SCH-2025-0061 — Einbruch\nOrt: Berlin\nSchadenshöhe: 9.420 EUR\n\nWohnungseinbruch tagsüber, Schmuck und Elektronik weg.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0062",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Hamburg (0062)",
+    "inhalt": "Schadensfall SCH-2025-0062 — Wasserschaden\nOrt: Hamburg\nSchadenshöhe: 9.557 EUR\n\nDachrinne verstopft, Wasser ins Mauerwerk eingedrungen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0063",
+    "kategorie": "Brand",
+    "titel": "Brand München (0063)",
+    "inhalt": "Schadensfall SCH-2025-0063 — Brand\nOrt: München\nSchadenshöhe: 9.694 EUR\n\nKaminbrand, Rußrückstau in Wohnzimmer.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0064",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Köln (0064)",
+    "inhalt": "Schadensfall SCH-2025-0064 — KFZ-Unfall\nOrt: Köln\nSchadenshöhe: 9.831 EUR\n\nParkplatzrempler, Delle und Kratzer, Zeuge vorhanden. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0065",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Frankfurt (0065)",
+    "inhalt": "Schadensfall SCH-2025-0065 — Glasbruch\nOrt: Frankfurt\nSchadenshöhe: 9.968 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0066",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Stuttgart (0066)",
+    "inhalt": "Schadensfall SCH-2025-0066 — Einbruch\nOrt: Stuttgart\nSchadenshöhe: 10.105 EUR\n\nBüroeinbruch über Fenster, Laptops und Bargeld gestohlen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0067",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Düsseldorf (0067)",
+    "inhalt": "Schadensfall SCH-2025-0067 — Wasserschaden\nOrt: Düsseldorf\nSchadenshöhe: 10.242 EUR\n\nStarkregen, Keller vollgelaufen, Heizung beschädigt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0068",
+    "kategorie": "Brand",
+    "titel": "Brand Leipzig (0068)",
+    "inhalt": "Schadensfall SCH-2025-0068 — Brand\nOrt: Leipzig\nSchadenshöhe: 10.379 EUR\n\nKerze umgefallen, Tisch und Teppich verbrannt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0069",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Dortmund (0069)",
+    "inhalt": "Schadensfall SCH-2025-0069 — KFZ-Unfall\nOrt: Dortmund\nSchadenshöhe: 10.516 EUR\n\nDiebstahl Außenspiegel in der Innenstadt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0070",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Essen (0070)",
+    "inhalt": "Schadensfall SCH-2025-0070 — Glasbruch\nOrt: Essen\nSchadenshöhe: 10.653 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0071",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Bremen (0071)",
+    "inhalt": "Schadensfall SCH-2025-0071 — Einbruch\nOrt: Bremen\nSchadenshöhe: 10.790 EUR\n\nEinbruch Lager, Elektrowerkzeug ca. 8.000 EUR gestohlen. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0072",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Dresden (0072)",
+    "inhalt": "Schadensfall SCH-2025-0072 — Wasserschaden\nOrt: Dresden\nSchadenshöhe: 10.927 EUR\n\nFrostschaden Außenwasserleitung, Rohrbruch Keller.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0073",
+    "kategorie": "Brand",
+    "titel": "Brand Berlin (0073)",
+    "inhalt": "Schadensfall SCH-2025-0073 — Brand\nOrt: Berlin\nSchadenshöhe: 11.064 EUR\n\nElektroverteiler Überhitzung, Dachstuhl angekokelt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0074",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Hamburg (0074)",
+    "inhalt": "Schadensfall SCH-2025-0074 — KFZ-Unfall\nOrt: Hamburg\nSchadenshöhe: 11.201 EUR\n\nAuffahrunfall Stau, minimaler Stoßstangenschaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0075",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch München (0075)",
+    "inhalt": "Schadensfall SCH-2025-0075 — Glasbruch\nOrt: München\nSchadenshöhe: 11.338 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0076",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Köln (0076)",
+    "inhalt": "Schadensfall SCH-2025-0076 — Einbruch\nOrt: Köln\nSchadenshöhe: 11.475 EUR\n\nGartengeräteentnahme aus Schuppen, Schloss aufgeflext.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0077",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Frankfurt (0077)",
+    "inhalt": "Schadensfall SCH-2025-0077 — Wasserschaden\nOrt: Frankfurt\nSchadenshöhe: 11.612 EUR\n\nHauswasserwerk defekt, Schaden im Hauswirtschaftsraum.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0078",
+    "kategorie": "Brand",
+    "titel": "Brand Stuttgart (0078)",
+    "inhalt": "Schadensfall SCH-2025-0078 — Brand\nOrt: Stuttgart\nSchadenshöhe: 11.749 EUR\n\nAdventskranz Zimmerbrand, Sofa und Vorhänge verbrannt. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0079",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Düsseldorf (0079)",
+    "inhalt": "Schadensfall SCH-2025-0079 — KFZ-Unfall\nOrt: Düsseldorf\nSchadenshöhe: 11.886 EUR\n\nVorfahrtsverletzung Kreuzung, Seitenaufprall, leichter Sachschaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0080",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Leipzig (0080)",
+    "inhalt": "Schadensfall SCH-2025-0080 — Glasbruch\nOrt: Leipzig\nSchadenshöhe: 12.023 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0081",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Dortmund (0081)",
+    "inhalt": "Schadensfall SCH-2025-0081 — Einbruch\nOrt: Dortmund\nSchadenshöhe: 12.160 EUR\n\nKellereinbruch, Werkzeug entwendet, Hebelspuren an Tür.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0082",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Essen (0082)",
+    "inhalt": "Schadensfall SCH-2025-0082 — Wasserschaden\nOrt: Essen\nSchadenshöhe: 12.297 EUR\n\nWaschmaschine Leck, Laminat aufgequollen, Schimmelgefahr.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0083",
+    "kategorie": "Brand",
+    "titel": "Brand Bremen (0083)",
+    "inhalt": "Schadensfall SCH-2025-0083 — Brand\nOrt: Bremen\nSchadenshöhe: 12.434 EUR\n\nKurzschluss E-Roller Garage, Fahrzeug und Garagen Schaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0084",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Dresden (0084)",
+    "inhalt": "Schadensfall SCH-2025-0084 — KFZ-Unfall\nOrt: Dresden\nSchadenshöhe: 12.571 EUR\n\nUnfall enger Parkplatz Einkaufszentrum, Spiegel abgerissen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0085",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Berlin (0085)",
+    "inhalt": "Schadensfall SCH-2025-0085 — Glasbruch\nOrt: Berlin\nSchadenshöhe: 12.708 EUR\n\nDachziegelfall auf Wintergartenverglasung. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0086",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Hamburg (0086)",
+    "inhalt": "Schadensfall SCH-2025-0086 — Einbruch\nOrt: Hamburg\nSchadenshöhe: 845 EUR\n\nLadeneinbruch durch Dach, Kasse leer, Waren beschädigt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0087",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden München (0087)",
+    "inhalt": "Schadensfall SCH-2025-0087 — Wasserschaden\nOrt: München\nSchadenshöhe: 982 EUR\n\nGeschirrspüler-Zulaufschlauch geplatzt, drei Etagen betroffen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0088",
+    "kategorie": "Brand",
+    "titel": "Brand Köln (0088)",
+    "inhalt": "Schadensfall SCH-2025-0088 — Brand\nOrt: Köln\nSchadenshöhe: 1.119 EUR\n\nGartengrill zu nah an Holzterasse, Brandflecken.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0089",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Frankfurt (0089)",
+    "inhalt": "Schadensfall SCH-2025-0089 — KFZ-Unfall\nOrt: Frankfurt\nSchadenshöhe: 1.256 EUR\n\nHagelschaden während Gewitter, 40 Dellen, Glasschaden.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0090",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Stuttgart (0090)",
+    "inhalt": "Schadensfall SCH-2025-0090 — Glasbruch\nOrt: Stuttgart\nSchadenshöhe: 1.393 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0091",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Düsseldorf (0091)",
+    "inhalt": "Schadensfall SCH-2025-0091 — Einbruch\nOrt: Düsseldorf\nSchadenshöhe: 1.530 EUR\n\nFahrzeug aufgebrochen, Navi und Lenkrad entwendet.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0092",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Leipzig (0092)",
+    "inhalt": "Schadensfall SCH-2025-0092 — Wasserschaden\nOrt: Leipzig\nSchadenshöhe: 1.667 EUR\n\nSpülmaschine defekt, Küche unter Wasser, Boden zerstört. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0093",
+    "kategorie": "Brand",
+    "titel": "Brand Dortmund (0093)",
+    "inhalt": "Schadensfall SCH-2025-0093 — Brand\nOrt: Dortmund\nSchadenshöhe: 1.804 EUR\n\nTechnischer Defekt Kühlschrank, Küche beschädigt.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0094",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall Essen (0094)",
+    "inhalt": "Schadensfall SCH-2025-0094 — KFZ-Unfall\nOrt: Essen\nSchadenshöhe: 1.941 EUR\n\nWildunfall B27, Reh, Frontschaden ca. 3.200 EUR.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0095",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Bremen (0095)",
+    "inhalt": "Schadensfall SCH-2025-0095 — Glasbruch\nOrt: Bremen\nSchadenshöhe: 2.078 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0096",
+    "kategorie": "Einbruch",
+    "titel": "Einbruch Dresden (0096)",
+    "inhalt": "Schadensfall SCH-2025-0096 — Einbruch\nOrt: Dresden\nSchadenshöhe: 2.215 EUR\n\nSchuleinbruch Wochenende, IT-Ausstattung entwendet.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0097",
+    "kategorie": "Wasserschaden",
+    "titel": "Wasserschaden Berlin (0097)",
+    "inhalt": "Schadensfall SCH-2025-0097 — Wasserschaden\nOrt: Berlin\nSchadenshöhe: 2.352 EUR\n\nDachrinne verstopft, Wasser ins Mauerwerk eingedrungen.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0098",
+    "kategorie": "Brand",
+    "titel": "Brand Hamburg (0098)",
+    "inhalt": "Schadensfall SCH-2025-0098 — Brand\nOrt: Hamburg\nSchadenshöhe: 2.489 EUR\n\nKaminbrand, Rußrückstau in Wohnzimmer.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0099",
+    "kategorie": "KFZ-Unfall",
+    "titel": "KFZ-Unfall München (0099)",
+    "inhalt": "Schadensfall SCH-2025-0099 — KFZ-Unfall\nOrt: München\nSchadenshöhe: 2.626 EUR\n\nParkplatzrempler, Delle und Kratzer, Zeuge vorhanden. Kein unabhängiger Zeuge. VN war bereits in ähnlichem Schadensfall involviert.",
+    "quelle": "db"
+  },
+  {
+    "fall_nr": "SCH-2025-0100",
+    "kategorie": "Glasbruch",
+    "titel": "Glasbruch Köln (0100)",
+    "inhalt": "Schadensfall SCH-2025-0100 — Glasbruch\nOrt: Köln\nSchadenshöhe: 2.763 EUR\n\nDachziegelfall auf Wintergartenverglasung.",
+    "quelle": "db"
+  }
+]

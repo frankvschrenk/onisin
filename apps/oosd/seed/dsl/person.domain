@@ -1,0 +1,86 @@
+// person.domain — domain-dsl example
+// Re-expression of the legacy person ctx (person_list + person_detail)
+// in the new domain-dsl. Pure data model: fields, permissions,
+// relations, meta-sources and AI hints. UI behaviour lives in views.
+
+domain person from person@demo {
+
+  permission admin   read, write, delete
+  permission manager read, write
+  permission user    read
+
+  field id               : int      readonly
+  field uuid             : string   readonly
+  field source           : string   readonly
+  field created_at       : datetime readonly
+  field updated_at       : datetime readonly
+
+  field title            : string
+  field firstname        : string   filterable {
+    example like "Anna" "Vorname enthält 'Anna'"
+  }
+  field lastname         : string   filterable {
+    example like "Meier" "Nachname enthält 'Meier'"
+  }
+  field age              : int      filterable {
+    example gt 50 "Personen älter als 50"
+    example lt 30 "Personen jünger als 30"
+  }
+  field net_worth        : float
+  field profile_complete : float
+
+  field role             : string   options=roles
+  field department       : string   options=departments
+  field employment       : string   options=employment_types
+  field active           : bool
+
+  field street           : string
+  field zip              : string
+  field city             : string   options=cities filterable {
+    example eq   "Berlin" "Genaue Stadt"
+    example like "Berg"   "Stadt enthält 'Berg'"
+  }
+  field country          : string   options=countries
+
+  field email            : string   filterable {
+    example like "@example.com" "E-Mail-Domain"
+  }
+  field phone            : string
+  field mobile           : string
+  field linkedin         : string
+
+  field notify_channel   : string   options=notify_channels
+  field notify_email     : bool
+  field notify_push      : bool
+  field notify_sms       : bool
+  field notify_weekly    : bool
+
+  field language         : string   options=languages
+  field font_size        : int
+
+  field notes            : text
+
+  relation notes : has_many note bind=id -> person_id
+
+  meta roles            from role            key  label order_by label
+  meta departments      from department      key  label order_by label
+  meta employment_types from employment_type key  label order_by label
+  meta cities           from city            name name  order_by name
+  meta countries        from country         code name  order_by name
+  meta notify_channels  from notify_channel  key  label
+  meta languages        from language        code name  order_by name
+
+  ai "scope"
+     "Personen sind Mitarbeiter, Kunden und Kontakte. Eine Zeile pro Person."
+
+  ai "edit_behavior"
+     "id, uuid, source, created_at und updated_at sind readonly und dürfen nie geändert werden."
+
+  ai "dropdowns"
+     "role, department, employment, city, country, notify_channel und language sind Dropdowns. Werte stammen ausschließlich aus der jeweiligen Meta-Tabelle, kein Freitext."
+
+  ai "format_hint"
+     "net_worth ist Betrag in EUR. age in Jahren, keine Dezimalstellen."
+
+  aliases [ "mitarbeiter", "kunden", "kontakte", "ansprechpartner" ]
+}

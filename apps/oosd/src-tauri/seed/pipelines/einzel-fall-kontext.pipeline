@@ -1,0 +1,33 @@
+pipeline "Einzel-Fall Audit" {
+  source db schaeden from pipeline_documents
+  mode    context
+  llm     "gemma4:latest"
+
+  step where einzel {
+    from schaeden
+    where {
+      { fall_nr: { _eq: "SCH-2024-0002" } }
+    }
+  }
+
+  step llm plausibilitaet {
+    from einzel
+    mode aggregate
+    system "Versicherungsgutachter. Prüfe Stimmigkeit, nicht zusammenfassen."
+    prompt "Sind alle Beträge, Daten und Ortsangaben in sich konsistent? Antworte als Bullet-Liste mit ✓ oder ⚠ pro Aspekt. Keine Wiederholung der Falldaten."
+  }
+
+  step llm risiken {
+    from einzel
+    mode aggregate
+    prompt "Welche Folgerisiken existieren (Schimmel, Mieterausfall, Folgeschäden)? Eine Bullet-Liste, pro Risiko max. 1 Zeile."
+  }
+
+  step llm empfehlung {
+    from einzel
+    mode aggregate
+    prompt "Eine Zeile: Auszahlung freigeben / mit Vorbehalt / Nachprüfung erforderlich. Plus 1-Satz-Begründung."
+  }
+
+  out editor
+}

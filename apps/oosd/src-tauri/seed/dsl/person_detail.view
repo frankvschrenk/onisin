@@ -1,0 +1,101 @@
+// person_detail.view — view-dsl example
+// Multi-tab entity view over the person domain.
+
+view person_detail "Person — Detail" over person {
+
+  toolbar {
+    save
+    delete confirm="Person wirklich löschen?"
+    exit
+  }
+
+  row p=md {
+    icon "account" size=48
+    stack ml=md expand {
+      richtext {
+        heading "Person — Detail"
+        bold    "Enterprise Mitarbeiterprofil"
+      }
+    }
+  }
+  divider
+
+  tabs p=sm {
+    tab "Stammdaten" {
+      section "Persönliche Daten" p=md {
+        text "ID" -> person.id readonly
+        grid cols=2 gap=md mt=sm {
+          text   "Vorname"  -> person.firstname focus
+          text   "Nachname" -> person.lastname
+          text   "Titel"    -> person.title
+          number "Alter"    -> person.age
+        }
+        grid cols=2 gap=md mt=sm {
+          number   "Vermögen (EUR)"        -> person.net_worth        format=currency
+          progress "Profil-Vollständigkeit" -> person.profile_complete
+        }
+      }
+      section "Zugehörigkeit" p=md pt=0 {
+        grid cols=2 gap=md {
+          select "Rolle"     -> person.role
+          select "Abteilung" -> person.department
+        }
+        grid cols=2 gap=md mt=sm {
+          radio "Anstellungsart"    -> person.employment
+          check "Mitarbeiter aktiv" -> person.active
+        }
+      }
+    }
+
+    tab "Kontakt" {
+      section "Adresse" p=md {
+        text "Straße" -> person.street
+        grid cols=3 gap=md mt=sm {
+          text   "PLZ"   -> person.zip
+          select "Stadt" -> person.city
+          select "Land"  -> person.country
+        }
+      }
+      section "Kommunikation" p=md pt=0 {
+        grid cols=2 gap=md {
+          email "E-Mail"   -> person.email
+          text  "Telefon"  -> person.phone
+          text  "Mobil"    -> person.mobile
+          text  "LinkedIn" -> person.linkedin
+        }
+      }
+    }
+
+    tab "Einstellungen" {
+      section "Benachrichtigungen" p=md {
+        radio "Bevorzugter Kanal" -> person.notify_channel
+        grid cols=2 gap=md mt=md {
+          check "Per E-Mail"                -> person.notify_email
+          check "Push-Benachrichtigung"     -> person.notify_push
+          check "Per SMS"                   -> person.notify_sms
+          check "Wöchentliche Zusammenfassung" -> person.notify_weekly
+        }
+      }
+      section "Darstellung" p=md pt=0 {
+        select "Sprache"      -> person.language
+        slider "Schriftgröße" -> person.font_size min=10 max=24 step=1 mt=sm
+      }
+    }
+
+    tab "System" {
+      accordion p=md {
+        item "Notizen" open {
+          textarea -> person.notes placeholder="Interne Notizen..." p=sm
+        }
+        item "Technische Informationen" {
+          grid cols=2 gap=md p=sm {
+            text "Erstellt am" -> person.created_at readonly format=datetime:short
+            text "Geändert am" -> person.updated_at readonly format=datetime:short
+            text "UUID"        -> person.uuid       readonly
+            text "Quelle"      -> person.source     readonly
+          }
+        }
+      }
+    }
+  }
+}

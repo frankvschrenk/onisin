@@ -1,0 +1,20 @@
+// note_detail.view — view-dsl example
+
+view note_detail "Notiz — Detail" over note {
+
+  toolbar {
+    save
+    delete confirm="Notiz wirklich löschen?"
+    exit
+  }
+
+  section "Notiz" p=md {
+    text "ID"        -> note.id         readonly
+    text "Person ID" -> note.person_id  readonly
+    text "Datum"     -> note.created_at readonly format=datetime:short
+  }
+  section "Inhalt" p=md pt=0 {
+    text     "Titel" -> note.title focus
+    textarea         -> note.body placeholder="Notiz..." p=sm mt=sm
+  }
+}

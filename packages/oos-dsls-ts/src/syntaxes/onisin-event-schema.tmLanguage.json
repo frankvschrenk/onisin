@@ -1,0 +1,61 @@
+{
+  "name": "onisin-event-schema",
+  "scopeName": "source.onisin-event-schema",
+  "fileTypes": [
+    ".event-schema"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "name": "keyword.control.onisin-event-schema",
+      "match": "\\b(EventType|boolean|date|datetime|number|optional|required|string)\\b"
+    },
+    {
+      "name": "string.quoted.double.onisin-event-schema",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "include": "#string-character-escape"
+        }
+      ]
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.onisin-event-schema",
+          "begin": "/\\*",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.onisin-event-schema"
+            }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.onisin-event-schema"
+            }
+          }
+        },
+        {
+          "begin": "//",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.whitespace.comment.leading.onisin-event-schema"
+            }
+          },
+          "end": "(?=$)",
+          "name": "comment.line.onisin-event-schema"
+        }
+      ]
+    },
+    "string-character-escape": {
+      "name": "constant.character.escape.onisin-event-schema",
+      "match": "\\\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\\{[0-9A-Fa-f]+\\}|[0-2][0-7]{0,2}|3[0-6][0-7]?|37[0-7]?|[4-7][0-7]?|.|$)"
+    }
+  }
+}

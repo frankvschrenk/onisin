@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+dist-web/
+artifacts/
+.env
+*.log
+.DS_Store
+
+# generated worker bundles (built via scripts/build-workers.ts)
+src/mainview/workers/
+src/previewview/workers/
+
+# generated help content (built via scripts/build-help.ts)
+src/mainview/components/help/

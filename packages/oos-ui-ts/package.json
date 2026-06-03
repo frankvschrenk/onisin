@@ -1,0 +1,29 @@
+{
+  "name": "oos-ui-ts",
+  "version": "1.0.0",
+  "description": "Onisin UI \u2014 Mantine renderer for ViewDef + DomainDef plus state binding and mutation envelope",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "oos-dsls-ts": "workspace:*"
+  },
+  "peerDependencies": {
+    "@mantine/core": "^9.0.0",
+    "@mantine/dates": "^9.0.0",
+    "@mantine/hooks": "^9.0.0",
+    "@tabler/icons-react": "^3.26.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.2"
+  },
+  "scripts": {}
+}

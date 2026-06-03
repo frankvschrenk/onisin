@@ -1,0 +1,39 @@
+{
+	"projectName": "Onisin",
+	"languages": [
+		{
+			"id": "onisin-domain",
+			"grammar": "grammar/domain.langium",
+			"fileExtensions": [".domain"],
+			"textMate": {
+				"out": "src/syntaxes/onisin-domain.tmLanguage.json"
+			},
+			"monarch": {
+				"out": "src/syntaxes/onisin-domain.monarch.ts"
+			}
+		},
+		{
+			"id": "onisin-view",
+			"grammar": "grammar/view.langium",
+			"fileExtensions": [".view"],
+			"textMate": {
+				"out": "src/syntaxes/onisin-view.tmLanguage.json"
+			},
+			"monarch": {
+				"out": "src/syntaxes/onisin-view.monarch.ts"
+			}
+		},
+		{
+			"id": "onisin-event-schema",
+			"grammar": "grammar/event-schema.langium",
+			"fileExtensions": [".event-schema"],
+			"textMate": {
+				"out": "src/syntaxes/onisin-event-schema.tmLanguage.json"
+			},
+			"monarch": {
+				"out": "src/syntaxes/onisin-event-schema.monarch.ts"
+			}
+		}
+	],
+	"out": "src/generated"
+}

@@ -1,0 +1,98 @@
+<oos>
+  <context name="person_list" kind="collection" source="person" dsn="demo">
+    <permission role="admin"   actions="read,write,delete"/>
+    <permission role="manager" actions="read,write"/>
+    <permission role="user"    actions="read"/>
+    <list_fields>id, firstname, lastname, email, city, age, net_worth</list_fields>
+    <field name="id"        type="int"    readonly="true"/>
+    <field name="firstname" type="string" filterable="true">
+      <example op="like" value="Anna">Vorname enthaelt &quot;Anna&quot;</example>
+    </field>
+    <field name="lastname"  type="string" filterable="true">
+      <example op="like" value="Meier">Nachname enthaelt &quot;Meier&quot;</example>
+    </field>
+    <field name="age"       type="int"    filterable="true">
+      <example op="gt" value="50">Personen aelter als 50</example>
+      <example op="lt" value="30">Personen juenger als 30</example>
+    </field>
+    <field name="net_worth" type="float"/>
+    <field name="street"    type="string"/>
+    <field name="zip"       type="string"/>
+    <field name="city"      type="string" filterable="true">
+      <example op="eq"   value="Berlin">Genaue Stadt</example>
+      <example op="like" value="Berg">Stadt enthaelt &quot;Berg&quot;</example>
+    </field>
+    <field name="email"     type="string" filterable="true">
+      <example op="like" value="@example.com">E-Mail-Domain</example>
+    </field>
+    <field name="phone"     type="string"/>
+    <navigate event="on_select" to="person_detail" bind="id -> id"/>
+    <navigate event="on_new"    to="person_detail" bind=""/>
+    <relation name="notes" context="note_list" type="has_many" bind="id -> person_id"/>
+    <ai name="scope">
+      Hier leben Personen als Mitarbeiter, Kunden und Kontakte. Eine Zeile pro Person.
+    </ai>
+    <ai name="navigation">
+      Ein Klick auf eine Tabellenzeile oeffnet person_detail mit der id dieser Person.
+    </ai>
+    <ai name="format_hint">
+      net_worth ist Betrag in EUR. age in Jahren, keine Dezimalstellen.
+    </ai>
+  </context>
+  <context name="person_detail" kind="entity" source="person" dsn="demo">
+    <permission role="admin"   actions="read,write,delete"/>
+    <permission role="manager" actions="read,write"/>
+    <permission role="user"    actions="read"/>
+    <ai name="edit_behavior">
+      id, uuid, source, created_at und updated_at sind readonly und duerfen nie geaendert werden.
+    </ai>
+    <ai name="dropdowns">
+      role, department, employment, city, country, notify_channel, language sind Dropdowns.
+      Werte muessen aus der jeweiligen Meta-Tabelle kommen, kein Freitext.
+    </ai>
+    <ai name="workflow">
+      Aenderungen immer ueber oos_ui_change_required vorschlagen, dann oos_ui_save nach Bestaetigung.
+    </ai>
+    <field name="id"               type="int"      readonly="true"/>
+    <field name="title"            type="string"/>
+    <field name="firstname"        type="string"   filterable="true"/>
+    <field name="lastname"         type="string"   filterable="true"/>
+    <field name="age"              type="int"/>
+    <field name="net_worth"        type="float"/>
+    <field name="role"             type="string"   meta="roles"/>
+    <field name="department"       type="string"   meta="departments"/>
+    <field name="employment"       type="string"   meta="employment_types"/>
+    <field name="active"           type="bool"/>
+    <field name="profile_complete" type="float"/>
+    <field name="street"           type="string"/>
+    <field name="zip"              type="string"/>
+    <field name="city"             type="string"   meta="cities"/>
+    <field name="country"          type="string"   meta="countries"/>
+    <field name="email"            type="string"/>
+    <field name="phone"            type="string"/>
+    <field name="mobile"           type="string"/>
+    <field name="linkedin"         type="string"/>
+    <field name="notify_channel"   type="string"   meta="notify_channels"/>
+    <field name="notify_email"     type="bool"/>
+    <field name="notify_push"      type="bool"/>
+    <field name="notify_sms"       type="bool"/>
+    <field name="notify_weekly"    type="bool"/>
+    <field name="language"         type="string"   meta="languages"/>
+    <field name="font_size"        type="int"/>
+    <field name="notes"            type="text"/>
+    <field name="uuid"             type="string"   readonly="true"/>
+    <field name="source"           type="string"   readonly="true"/>
+    <field name="created_at"       type="datetime" readonly="true"/>
+    <field name="updated_at"       type="datetime" readonly="true"/>
+    <meta name="roles"            table="role"            value="key"  label="label" dsn="demo" order_by="label"/>
+    <meta name="departments"      table="department"      value="key"  label="label" dsn="demo" order_by="label"/>
+    <meta name="employment_types" table="employment_type" value="key"  label="label" dsn="demo" order_by="label"/>
+    <meta name="cities"           table="city"            value="name" label="name"  dsn="demo" order_by="name"/>
+    <meta name="countries"        table="country"         value="code" label="name"  dsn="demo" order_by="name"/>
+    <meta name="notify_channels"  table="notify_channel"  value="key"  label="label" dsn="demo"/>
+    <meta name="languages"        table="language"        value="code" label="name"  dsn="demo" order_by="name"/>
+    <navigate event="on_notes" to="note_list" bind="id -> person_id"/>
+    <action event="on_delete" type="delete" confirm="Person wirklich löschen?"/>
+    <action event="save"      type="save"/>
+  </context>
+</oos>

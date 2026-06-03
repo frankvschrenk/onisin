@@ -1,0 +1,41 @@
+<oos>
+  <context name="note_list" kind="collection" source="note" dsn="demo">
+    <permission role="admin"   actions="read,write,delete"/>
+    <permission role="manager" actions="read,write"/>
+    <permission role="user"    actions="read"/>
+    <list_fields>id, title, created_at</list_fields>
+    <field name="id"         type="int"    readonly="true"/>
+    <field name="person_id"  type="int"    filterable="true">
+      <example op="eq" value="42">Alle Notizen der Person mit id 42</example>
+    </field>
+    <field name="title"      type="string" filterable="true">
+      <example op="like" value="Meeting">Titel enthaelt &quot;Meeting&quot;</example>
+    </field>
+    <field name="body"       type="string"/>
+    <field name="created_at" type="string"/>
+    <navigate event="on_select" to="note_detail" bind="id -> id"/>
+    <navigate event="on_new"    to="note_detail" bind=""/>
+    <ai name="scope">
+      Notizen gehoeren immer zu einer Person. Fuer Notizen einer bestimmten Person
+      stets nach person_id filtern.
+    </ai>
+    <ai name="navigation">
+      Ein Klick auf eine Zeile oeffnet note_detail mit der id dieser Notiz.
+    </ai>
+  </context>
+  <context name="note_detail" kind="entity" source="note" dsn="demo">
+    <permission role="admin"   actions="read,write,delete"/>
+    <permission role="manager" actions="read,write"/>
+    <permission role="user"    actions="read"/>
+    <ai name="edit_behavior">
+      Nur title und body sind editierbar. id, person_id und created_at sind readonly.
+    </ai>
+    <field name="id"         type="int"    readonly="true"/>
+    <field name="person_id"  type="int"    readonly="true"/>
+    <field name="title"      type="string"/>
+    <field name="body"       type="string"/>
+    <field name="created_at" type="string" readonly="true"/>
+    <action event="on_delete" type="delete" confirm="Notiz wirklich löschen?"/>
+    <action event="save"      type="save"/>
+  </context>
+</oos>

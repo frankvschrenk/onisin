@@ -1,0 +1,28 @@
+pipeline "Fraud Detection" {
+  source db  schaeden from pipeline_documents
+  mode      mass
+  llm       "gemma4:26b"
+  embedding "bge-m3:latest"
+
+  step semantic vorauswahl {
+    from  schaeden
+    query "Anzeichen von Versicherungsbetrug"
+    query "widersprüchliche Angaben zum Schadenshergang"
+    limit 20
+  }
+
+  step llm pruefung {
+    from   vorauswahl
+    mode   per-row
+    system "Du bist ein erfahrener Versicherungs-Betrugsprüfer."
+    prompt "Markiere Betrugsindikatoren in diesem Fall. Antworte als Bullet-Liste, pro Indikator max. 1 Zeile, Format: ‘⚠ <Indikator>: <Begründung>’. Wenn keine Auffälligkeiten, antworte exakt: ‘✓ unauffällig’."
+  }
+
+  step llm bericht {
+    from   pruefung
+    mode   aggregate
+    prompt "Aggregiere die Einzelprüfungen zu einem Risikobericht. Gliederung: (1) Fälle mit Verdacht (sortiert nach Schwere), (2) Fälle ohne Auffälligkeiten als Kurzliste, (3) Empfehlung nächster Schritte in maximal 3 Bullet-Points."
+  }
+
+  out editor
+}

@@ -1,0 +1,20 @@
+[package]
+name = "oosgql"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "oosgql"
+path = "src/main.rs"
+
+[dependencies]
+oos-svc = { workspace = true }
+oos-dsls = { workspace = true }
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }

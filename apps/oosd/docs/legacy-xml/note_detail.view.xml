@@ -1,0 +1,12 @@
+<screen id="note_detail" title="Notiz — Detail" label-color="primary"
+        delete="true" save="true" exit="true">
+  <section label="Notiz" p="3">
+    <field label="ID"        bind="note.id"         readonly="true"/>
+    <field label="Person ID" bind="note.person_id"  readonly="true"/>
+    <field label="Datum"     bind="note.created_at" readonly="true"/>
+  </section>
+  <section label="Inhalt" p="3" pt="0">
+    <field    label="Titel" bind="note.title" focus="true"/>
+    <textarea bind="note.body" placeholder="Notiz..." p="2" mt="2"/>
+  </section>
+</screen>

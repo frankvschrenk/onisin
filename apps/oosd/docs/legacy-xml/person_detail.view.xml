@@ -1,0 +1,87 @@
+<screen id="person_detail" title="Person — Detail" label-color="primary" delete="true" save="true" exit="true" cur="EUR" locale="de-DE">
+  <box orient="horizontal" p="3">
+    <icon name="account" size="48"/>
+    <box orient="vertical" ml="3" expand="true">
+      <richtext>
+        <span style="heading">Person — Detail</span>
+        <span style="bold">Enterprise Mitarbeiterprofil</span>
+      </richtext>
+    </box>
+  </box>
+  <sep/>
+  <tabs p="2">
+    <tab label="Stammdaten">
+      <section label="Persönliche Daten" p="3">
+        <field label="ID" bind="person.id" readonly="true"/>
+        <section cols="2" gap="4" mt="2">
+          <field focus="true" label="Vorname" bind="person.firstname"/>
+          <field label="Nachname" bind="person.lastname"/>
+          <field label="Titel" bind="person.title"/>
+          <field label="Alter" bind="person.age"/>
+        </section>
+        <section cols="2" gap="4" mt="2">
+          <field label="Vermögen (EUR)" bind="person.net_worth" format="@"/>
+          <field label="Profil-Vollständigkeit" bind="person.profile_complete" widget="progress"/>
+        </section>
+      </section>
+      <section label="Zugehörigkeit" p="3" pt="0">
+        <section cols="2" gap="4">
+          <field label="Rolle" bind="person.role" widget="choices" options="roles"/>
+          <field label="Abteilung" bind="person.department" widget="choices" options="departments"/>
+        </section>
+        <section cols="2" gap="4" mt="2">
+          <field label="Anstellungsart" bind="person.employment" widget="radio" options="employment_types"/>
+          <field bind="person.active" widget="check" label="Mitarbeiter aktiv"/>
+        </section>
+      </section>
+    </tab>
+    <tab label="Kontakt">
+      <section label="Adresse" p="3">
+        <field label="Straße" bind="person.street"/>
+        <section cols="3" gap="4" mt="2">
+          <field label="PLZ" bind="person.zip"/>
+          <field label="Stadt" bind="person.city" widget="choices" options="cities"/>
+          <field label="Land" bind="person.country" widget="choices" options="countries"/>
+        </section>
+      </section>
+      <section label="Kommunikation" p="3" pt="0">
+        <section cols="2" gap="4">
+          <field label="E-Mail" bind="person.email"/>
+          <field label="Telefon" bind="person.phone"/>
+          <field label="Mobil" bind="person.mobile"/>
+          <field label="LinkedIn" bind="person.linkedin"/>
+        </section>
+      </section>
+    </tab>
+    <tab label="Einstellungen">
+      <section label="Benachrichtigungen" p="3">
+        <field label="Bevorzugter Kanal" bind="person.notify_channel" widget="radio" options="notify_channels"/>
+        <section cols="2" gap="4" mt="3">
+          <check bind="person.notify_email" label="Per E-Mail"/>
+          <check bind="person.notify_push" label="Push-Benachrichtigung"/>
+          <check bind="person.notify_sms" label="Per SMS"/>
+          <check bind="person.notify_weekly" label="Wöchentliche Zusammenfassung"/>
+        </section>
+      </section>
+      <section label="Darstellung" p="3" pt="0">
+        <field label="Sprache" bind="person.language" widget="choices" options="languages"/>
+        <field label="Schriftgröße" bind="person.font_size" widget="slider" min="10" max="24" step="1" mt="2"/>
+      </section>
+    </tab>
+    <tab label="System">
+      <accordion p="3">
+        <accordion-item label="Notizen" open="true">
+          <textarea bind="person.notes" placeholder="Interne Notizen..." p="2"/>
+        </accordion-item>
+        <accordion-item label="Technische Informationen">
+          <section cols="2" gap="4" p="2">
+            <field label="Erstellt am" bind="person.created_at" readonly="true" format="datetime:short"/>
+            <field label="Geändert am" bind="person.updated_at" readonly="true" format="datetime:short"/>
+            <field label="UUID" bind="person.uuid" readonly="true"/>
+            <field label="Quelle" bind="person.source" readonly="true"/>
+          </section>
+        </accordion-item>
+      </accordion>
+    </tab>
+  </tabs>
+</screen>

@@ -1,0 +1,27 @@
+{
+  "name": "oos-theme-ts",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared Mantine theme, dark-mode CSS overrides and color-scheme toggle for OOS desktop apps",
+  "exports": {
+    ".":           "./src/index.ts",
+    "./theme.css": "./src/theme.css"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-sans": "^5.2.8"
+  },
+  "peerDependencies": {
+    "@mantine/core":         "^9.0.0",
+    "@tabler/icons-react":   "^3.0.0",
+    "react":                 "^19.0.0",
+    "react-dom":             "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/bun":            "latest",
+    "@types/react":          "^19.0.0",
+    "@types/react-dom":      "^19.0.0",
+    "typescript":            "^5.7.2"
+  },
+  "scripts": {}
+}
