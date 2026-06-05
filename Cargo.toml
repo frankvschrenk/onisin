@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/oos-svc", "crates/oos-dsls", "services/oosai", "services/oosgql"]
+members = ["crates/oos-svc", "crates/oos-dsls", "services/oosai", "services/oosgql", "services/oosagent", "services/oosiam", "services/bench-nats", "services/oosmem"]
 
 [workspace.package]
 edition = "2021"
