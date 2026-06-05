@@ -1,0 +1,33 @@
+{
+  "name": "ooso",
+  "version": "0.1.0",
+  "description": "Onisin Operator \u2014 live process console (Tauri + React + Mantine, NATS-over-WebSocket)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@mantine/core": "^9.1.1",
+    "@mantine/hooks": "^9.1.1",
+    "@tabler/icons-react": "^3.26.0",
+    "@tauri-apps/api": "^2.10.1",
+    "nats.ws": "^1.30.3",
+    "oos-theme-ts": "workspace:*",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.1.2",
+    "typescript": "^5.7.2",
+    "vite": "^7.0.4"
+  }
+}

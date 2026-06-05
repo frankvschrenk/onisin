@@ -1,0 +1,37 @@
+# Standalone workspace: this src-tauri is deliberately NOT a member of the root
+# onisin Rust workspace (services/ + crates/). The empty [workspace] table
+# detaches it so the Tauri binary keeps its own Cargo.lock and target/, exactly
+# like oosd and the crypto reference app.
+[workspace]
+
+[package]
+name = "ooso"
+version = "0.1.0"
+edition = "2021"
+authors = ["Frank von Schrenk"]
+
+[lib]
+# Desktop entry point lives in the lib so the mobile entry-point macro can
+# reuse it; main.rs is a thin shim that calls ooso_lib::run().
+name = "ooso_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.10.2", features = [] }
+
+serde = { version = "1", features = ["derive"] }
+
+# get_identity builds a stable per-install node id (uuid bytes -> Base32, the
+# same uppercase look the old ooso showed) persisted under the app data dir,
+# plus the host name for the heartbeat the webview publishes on status.ooso.
+uuid = { version = "1", features = ["v4"] }
+data-encoding = "2"
+gethostname = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

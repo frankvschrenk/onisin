@@ -1,0 +1,11 @@
+/* Minimal reset — Mantine + oos-theme-ts own the rest. */
+html,
+body,
+#root {
+	height: 100%;
+	margin: 0;
+}
+
+body {
+	font-family: "IBM Plex Sans", system-ui, sans-serif;
+}
