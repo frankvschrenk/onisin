@@ -15,6 +15,7 @@ use commands::get_identity;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![get_identity])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

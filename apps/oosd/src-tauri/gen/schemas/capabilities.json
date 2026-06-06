@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capabilities for the oosd main window.","local":true,"windows":["main"],"permissions":["core:default","positioner:default","opener:default","store:default","dialog:default","fs:default","os:default","process:default"]}}
+{"default":{"identifier":"default","description":"Default capabilities for the oosd main window.","local":true,"windows":["main"],"permissions":["core:default","positioner:default","window-state:default","opener:default","store:default","dialog:default","fs:default","os:default","process:default"]}}
