@@ -18,6 +18,7 @@
         "@mantine/hooks": "^9.1.1",
         "@tabler/icons-react": "^3.26.0",
         "@tauri-apps/api": "^2.10.1",
+        "@tauri-apps/plugin-positioner": "^2",
         "oos-theme-ts": "workspace:*",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
@@ -52,6 +53,7 @@
         "@tauri-apps/plugin-fs": "^2.4.5",
         "@tauri-apps/plugin-opener": "^2.5.3",
         "@tauri-apps/plugin-os": "^2.3.2",
+        "@tauri-apps/plugin-positioner": "^2",
         "@tauri-apps/plugin-process": "^2.3.1",
         "@tauri-apps/plugin-store": "^2.4.2",
         "@tiptap/extension-link": "^3.23.4",
@@ -101,6 +103,7 @@
         "@tauri-apps/plugin-fs": "^2.4.5",
         "@tauri-apps/plugin-opener": "^2.5.3",
         "@tauri-apps/plugin-os": "^2.3.2",
+        "@tauri-apps/plugin-positioner": "^2",
         "@tauri-apps/plugin-process": "^2.3.1",
         "@tauri-apps/plugin-store": "^2.4.2",
         "dayjs": "^1.11.20",
@@ -135,6 +138,7 @@
         "@mantine/hooks": "^9.1.1",
         "@tabler/icons-react": "^3.26.0",
         "@tauri-apps/api": "^2.10.1",
+        "@tauri-apps/plugin-positioner": "^2",
         "nats.ws": "^1.30.3",
         "oos-theme-ts": "workspace:*",
         "react": "^19.2.0",
@@ -760,6 +764,8 @@
     "@tauri-apps/plugin-opener": ["@tauri-apps/plugin-opener@2.5.4", "", { "dependencies": { "@tauri-apps/api": "^2.11.0" } }, "sha512-1HnPkb+AmgO29HBazm4uPLKB+r7zzcTBW1d0fyYp1uP+jwtpoiNDGKMMzz58SFp49nOIrxdE3aUJtT57lfO9CQ=="],
 
     "@tauri-apps/plugin-os": ["@tauri-apps/plugin-os@2.3.2", "", { "dependencies": { "@tauri-apps/api": "^2.8.0" } }, "sha512-n+nXWeuSeF9wcEsSPmRnBEGrRgOy6jjkSU+UVCOV8YUGKb2erhDOxis7IqRXiRVHhY8XMKks00BJ0OAdkpf6+A=="],
+
+    "@tauri-apps/plugin-positioner": ["@tauri-apps/plugin-positioner@2.3.2", "", { "dependencies": { "@tauri-apps/api": "^2.11.0" } }, "sha512-QgJwKcb58P+EeIgDCvl/q7fPyDN4WdpoM5/yp4hxGYCUM2aetAr1jiqDUZn1I7X3yNYSC2etV4evlOVHgvsZBg=="],
 
     "@tauri-apps/plugin-process": ["@tauri-apps/plugin-process@2.3.1", "", { "dependencies": { "@tauri-apps/api": "^2.8.0" } }, "sha512-nCa4fGVaDL/B9ai03VyPOjfAHRHSBz5v6F/ObsB73r/dA3MHHhZtldaDMIc0V/pnUw9ehzr2iEG+XkSEyC0JJA=="],
 

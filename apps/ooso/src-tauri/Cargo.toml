@@ -20,6 +20,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+tauri-plugin-positioner = "2"
 tauri = { version = "2.10.2", features = [] }
 
 serde = { version = "1", features = ["derive"] }
