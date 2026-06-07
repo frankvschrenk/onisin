@@ -1,0 +1,33 @@
+# oosmlx — onisin inference engine, MLX backend for Apple Silicon. Thin: it
+# implements the Engine trait from oos-infer with an MLX forward pass and lets
+# oos-infer handle the API, model resolution and tokenizer. ooscuda will mirror
+# this layout with a CUDA backend.
+#
+# The real forward pass lives behind the `mlx` feature (mlx-rs); see [features].
+[package]
+name = "oosmlx"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "oosmlx"
+path = "src/main.rs"
+
+[dependencies]
+oos-infer = { path = "../../crates/oos-infer" }
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokenizers = "0.21"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+mlx-rs = { version = "0.25.3", optional = true }
+
+[features]
+default = []
+# `mlx` pulls in mlx-rs and the real Apple-Silicon forward pass. It builds MLX
+# from source on first compile (~10-20 min); the default build stays fast and
+# does not require MLX so non-Apple/CI checks keep working.
+mlx = ["dep:mlx-rs"]

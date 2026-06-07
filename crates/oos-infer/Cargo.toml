@@ -1,0 +1,18 @@
+# Backend-agnostic core for the onisin inference engines. Owns everything that
+# is not hardware-specific — the OpenAI-compatible HTTP surface, model
+# resolution (local dir or Hugging Face repo), and the Engine trait — so the
+# accelerator backends (oosmlx, later ooscuda) stay thin and behave identically.
+[package]
+name = "oos-infer"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1"
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+hf-hub = "0.4"
+tracing = "0.1"

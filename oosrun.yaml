@@ -1,0 +1,75 @@
+# oosrun profiles for the compiled onisin stack.
+#
+# Build first with `make all` (or `make api` / `make ui`), then run a profile:
+#   oosrun            full stack (default)
+#   oosrun api        headless Rust services
+#   oosrun ui         Tauri desktop apps
+#   oosrun dev        services via cargo run (live rebuild, no prior build)
+#
+# Each proc runs from the repo root, so binary paths are relative to it. The
+# release services and app binaries are self-contained (no cargo/bun at run
+# time); the dev profile sets PATH inline because cargo must be found.
+#
+# Prerequisites already up: nats-server (tcp 4222 / ws 4223) and Postgres
+# (localhost:5432/onisin).
+profiles:
+  # Headless Rust services, run from ./target/release.
+  api:
+    procs:
+      - name: oosiam
+        shell: ./target/release/oosiam
+      - name: oosai
+        shell: ./target/release/oosai
+      - name: oosmlx
+        shell: ./target/release/oosmlx
+      - name: oosgql
+        shell: ./target/release/oosgql
+      - name: oosagent
+        shell: ./target/release/oosagent
+
+  # Tauri desktop apps, launched the way a user does. On macOS that means the
+  # .app bundle via LaunchServices (open) — oosrun detects the bundle and does
+  # this automatically; running the inner binary would not reproduce a real
+  # launch (env, Gatekeeper, Dock all differ). Output goes to the system log,
+  # not the pane (oosrun prints a hint with the `log stream` command). The
+  # bundles are produced by `make ui`. Use cmd-arrays so the spaces in the
+  # bundle names need no escaping.
+  #
+  # bench is deliberately absent: its backend is a NATS responder on `bench.>`,
+  # and a second responder would steal the live bench-nats MCP tool calls.
+  # Launch bench yourself when cutting over.
+  ui:
+    procs:
+      - name: oos
+        cmd: ["./apps/oos/src-tauri/target/release/bundle/macos/Onisin OS.app"]
+      - name: oosd
+        cmd:
+          [
+            "./apps/oosd/src-tauri/target/release/bundle/macos/OnisinOS Designer.app",
+          ]
+      - name: ooso
+        cmd:
+          [
+            "./apps/ooso/src-tauri/target/release/bundle/macos/Onisin OS - Operator.app",
+          ]
+
+  # Everything: composed from the profiles above, no duplication.
+  all:
+    include: [api, ui]
+
+  # Live-rebuild backend: cargo run instead of prebuilt binaries, so edits
+  # recompile on the next start. PATH is prepended for the GUI-shell case where
+  # cargo is not otherwise resolvable. First run shares one ./target build lock,
+  # so the services compile one after another before running concurrently.
+  dev:
+    procs:
+      - name: oosmem
+        shell: 'PATH="/Users/frank/.cargo/bin:/opt/homebrew/bin:$PATH" cargo run -p oosmem'
+      - name: oosiam
+        shell: 'PATH="/Users/frank/.cargo/bin:/opt/homebrew/bin:$PATH" cargo run -p oosiam'
+      - name: oosai
+        shell: 'PATH="/Users/frank/.cargo/bin:/opt/homebrew/bin:$PATH" cargo run -p oosai'
+      - name: oosgql
+        shell: 'PATH="/Users/frank/.cargo/bin:/opt/homebrew/bin:$PATH" cargo run -p oosgql'
+      - name: oosagent
+        shell: 'PATH="/Users/frank/.cargo/bin:/opt/homebrew/bin:$PATH" cargo run -p oosagent'
