@@ -24,10 +24,11 @@ tokenizers = "0.21"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 mlx-rs = { version = "0.25.3", optional = true }
+rand = { version = "0.8", optional = true }
 
 [features]
 default = []
 # `mlx` pulls in mlx-rs and the real Apple-Silicon forward pass. It builds MLX
 # from source on first compile (~10-20 min); the default build stays fast and
 # does not require MLX so non-Apple/CI checks keep working.
-mlx = ["dep:mlx-rs"]
+mlx = ["dep:mlx-rs", "dep:rand"]

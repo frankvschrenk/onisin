@@ -99,7 +99,11 @@ impl Engine for MlxEngine {
         let mut step: Vec<i32> = ids;
         let mut out: Vec<u32> = Vec::new();
         for _ in 0..params.max_tokens {
-            let next = model.forward_argmax(&step, &mut cache)?;
+            let next = if params.temperature <= 0.0 {
+                model.forward_argmax(&step, &mut cache)?
+            } else {
+                model.forward_sample(&step, &mut cache, params.temperature, params.top_p)?
+            };
             if next == eos || Some(next) == end_of_turn {
                 break;
             }

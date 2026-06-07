@@ -72,6 +72,54 @@ fn attention_mask(offset: i32, seq: i32, klen: i32, window: Option<i32>) -> Arra
     Array::from_slice(&data, &[1, 1, seq, klen])
 }
 
+/// Top-p (nucleus) sampling over one logit row, with temperature.
+///
+/// Done on the CPU rather than on-device: it is trivial to read against a
+/// reference and the per-token cost (one softmax + one sort of the vocab) is
+/// negligible next to the forward pass. On-device sampling is a later
+/// optimisation. `temperature` is assumed > 0 (greedy has its own path).
+fn sample_top_p(logits: &[f32], temperature: f32, top_p: f32) -> i32 {
+    // Temperature-scaled softmax, shifted by the max for numerical stability
+    // (max of the scaled logits equals max(logits)/temperature for T > 0).
+    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let mut probs: Vec<f32> = logits
+        .iter()
+        .map(|&l| ((l - max) / temperature).exp())
+        .collect();
+    let sum: f32 = probs.iter().sum();
+    for p in &mut probs {
+        *p /= sum;
+    }
+
+    // Keep the smallest set of highest-probability tokens whose mass reaches
+    // top_p (the nucleus).
+    let mut order: Vec<usize> = (0..probs.len()).collect();
+    order.sort_unstable_by(|&a, &b| probs[b].total_cmp(&probs[a]));
+    let mut cum = 0.0f32;
+    let mut nucleus_end = order.len();
+    for (rank, &i) in order.iter().enumerate() {
+        cum += probs[i];
+        if cum >= top_p {
+            nucleus_end = rank + 1;
+            break;
+        }
+    }
+    let nucleus = &order[..nucleus_end];
+
+    // Sample within the nucleus, renormalised by its mass.
+    let mass: f32 = nucleus.iter().map(|&i| probs[i]).sum();
+    let mut r = rand::random::<f32>() * mass;
+    for &i in nucleus {
+        r -= probs[i];
+        if r <= 0.0 {
+            return i as i32;
+        }
+    }
+    // Floating-point slack can let the loop fall through; the last nucleus
+    // token is the safe choice.
+    nucleus[nucleus.len() - 1] as i32
+}
+
 /// One transformer block's weights (all f32).
 struct Layer {
     input_ln: Array,
@@ -250,11 +298,30 @@ impl GemmaModel {
         Ok(h.matmul(&self.lm_head.transpose()?)?)
     }
 
+    /// Logits `[vocab]` for the position right after this step's last token.
+    fn last_logits(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
+        let logits = self.forward(tokens, cache)?;
+        Ok(logits.index(tokens.len() as i32 - 1))
+    }
+
     /// Greedy next-token id for `tokens`, advancing `cache` by their count.
     pub fn forward_argmax(&self, tokens: &[i32], cache: &mut KvCache) -> Result<i32> {
-        let logits = self.forward(tokens, cache)?;
-        let last = logits.index(tokens.len() as i32 - 1);
+        let last = self.last_logits(tokens, cache)?;
         let next = ops::indexing::argmax(&last, false)?;
         Ok(next.item::<u32>() as i32)
+    }
+
+    /// Temperature + top-p sampled next-token id, advancing `cache`. The engine
+    /// routes `temperature <= 0` to `forward_argmax`, so here it is always > 0.
+    pub fn forward_sample(
+        &self,
+        tokens: &[i32],
+        cache: &mut KvCache,
+        temperature: f32,
+        top_p: f32,
+    ) -> Result<i32> {
+        let last = self.last_logits(tokens, cache)?;
+        last.eval()?;
+        Ok(sample_top_p(last.as_slice::<f32>(), temperature, top_p))
     }
 }
