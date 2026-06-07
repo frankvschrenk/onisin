@@ -1,69 +1,43 @@
 //! The MLX-backed Engine.
 //!
-//! With `--features mlx` this runs the real Gemma 3 forward pass (see
-//! `model.rs`) in a greedy decode loop. Without the feature it loads the
-//! tokenizer + config and returns a placeholder, so non-Apple/CI builds stay
-//! green. Either way the API and the ooscuda contract are identical.
+//! With `--features mlx` this loads a model (dispatched by architecture in
+//! `crate::models`) and runs a real forward pass in an incremental decode loop.
+//! Without the feature it loads the tokenizer and returns a placeholder, so
+//! non-Apple/CI builds stay green. Either way the API and the ooscuda contract
+//! are identical. The decode loop is model-agnostic: it asks the model for
+//! logits and the stop tokens, and picks greedily or by sampling.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use oos_infer::engine::{Engine, GenParams, Generation};
 use oos_infer::openai::ChatMessage;
 use oos_infer::ModelFiles;
 use tokenizers::Tokenizer;
 
-use crate::config::GemmaConfig;
-
 pub struct MlxEngine {
     model_id: String,
     tokenizer: Tokenizer,
-    #[allow(dead_code)]
-    config: GemmaConfig,
     #[cfg(feature = "mlx")]
-    model: std::sync::Mutex<crate::model::GemmaModel>,
+    model: std::sync::Mutex<Box<dyn crate::models::Model>>,
 }
 
 impl MlxEngine {
     pub fn load(files: &ModelFiles, model_id: String) -> Result<Self> {
         let tokenizer = Tokenizer::from_file(&files.tokenizer_json)
             .map_err(|e| anyhow!("loading tokenizer {}: {e}", files.tokenizer_json.display()))?;
-        let config = GemmaConfig::load(&files.config_json).context("loading model config")?;
-
-        tracing::info!(
-            layers = config.num_hidden_layers,
-            hidden = config.hidden_size,
-            heads = config.num_attention_heads,
-            kv_heads = config.num_key_value_heads,
-            head_dim = config.head_dim,
-            vocab = config.vocab_size,
-            "loaded Gemma config"
-        );
 
         #[cfg(feature = "mlx")]
         let model = {
-            let m = crate::model::GemmaModel::load(&files.dir, &config).context("loading weights")?;
-            tracing::info!("MLX weights loaded");
+            let m = crate::models::load(files, &tokenizer)?;
+            tracing::info!(layers = m.num_layers(), "model loaded");
             std::sync::Mutex::new(m)
         };
 
         Ok(Self {
             model_id,
             tokenizer,
-            config,
             #[cfg(feature = "mlx")]
             model,
         })
-    }
-
-    /// Build a Gemma chat prompt for the last user turn. The turn markers are
-    /// added tokens in Gemma's tokenizer, so we encode them literally.
-    fn build_prompt(&self, messages: &[ChatMessage]) -> String {
-        let user = messages
-            .iter()
-            .rev()
-            .find(|m| m.role == "user")
-            .map(|m| m.content.as_str())
-            .unwrap_or("");
-        format!("<bos><start_of_turn>user\n{user}<end_of_turn>\n<start_of_turn>model\n")
     }
 }
 
@@ -74,37 +48,29 @@ impl Engine for MlxEngine {
 
     #[cfg(feature = "mlx")]
     fn generate(&self, messages: &[ChatMessage], params: &GenParams) -> Result<Generation> {
-        let prompt = self.build_prompt(messages);
-        let encoding = self
-            .tokenizer
-            .encode(prompt, false)
-            .map_err(|e| anyhow!("tokenize: {e}"))?;
-        let ids: Vec<i32> = encoding.get_ids().iter().map(|&u| u as i32).collect();
-        let prompt_tokens = ids.len();
-
-        let eos = self.config.eos_token_id as i32;
-        let end_of_turn = self
-            .tokenizer
-            .token_to_id("<end_of_turn>")
-            .map(|id| id as i32);
-
         let model = self
             .model
             .lock()
             .map_err(|_| anyhow!("model mutex poisoned"))?;
 
+        let prompt = model.render_prompt(messages);
+        let encoding = self
+            .tokenizer
+            .encode(prompt, false)
+            .map_err(|e| anyhow!("tokenize: {e}"))?;
+        let prompt_ids: Vec<i32> = encoding.get_ids().iter().map(|&u| u as i32).collect();
+        let prompt_tokens = prompt_ids.len();
+
         // Prefill the prompt on the first step; afterwards feed only the new
         // token and let the KV cache stand in for the rest of the prefix.
-        let mut cache = crate::model::KvCache::new(self.config.num_hidden_layers);
-        let mut step: Vec<i32> = ids;
+        let mut cache = crate::models::KvCache::new(model.num_layers());
+        let stop = model.stop_tokens();
+        let mut step = prompt_ids;
         let mut out: Vec<u32> = Vec::new();
         for _ in 0..params.max_tokens {
-            let next = if params.temperature <= 0.0 {
-                model.forward_argmax(&step, &mut cache)?
-            } else {
-                model.forward_sample(&step, &mut cache, params.temperature, params.top_p)?
-            };
-            if next == eos || Some(next) == end_of_turn {
+            let logits = model.forward_logits(&step, &mut cache)?;
+            let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
+            if stop.contains(&next) {
                 break;
             }
             out.push(next as u32);
@@ -125,10 +91,15 @@ impl Engine for MlxEngine {
 
     #[cfg(not(feature = "mlx"))]
     fn generate(&self, messages: &[ChatMessage], _params: &GenParams) -> Result<Generation> {
-        let prompt = self.build_prompt(messages);
+        let user = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map(|m| m.content.as_str())
+            .unwrap_or("");
         let prompt_tokens = self
             .tokenizer
-            .encode(prompt, false)
+            .encode(user, false)
             .map_err(|e| anyhow!("tokenize: {e}"))?
             .len();
         let text = format!(

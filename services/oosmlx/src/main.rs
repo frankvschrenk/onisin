@@ -11,10 +11,9 @@
 //! Env:   `NATS_URL` enables NATS; `OOS_INFER_SUBJECT` sets the subject prefix
 //!        (default `oos.cmd.infer`).
 
-mod config;
 mod engine;
 #[cfg(feature = "mlx")]
-mod model;
+mod models;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
