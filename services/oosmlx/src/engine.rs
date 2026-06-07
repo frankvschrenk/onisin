@@ -79,7 +79,7 @@ impl Engine for MlxEngine {
             .tokenizer
             .encode(prompt, false)
             .map_err(|e| anyhow!("tokenize: {e}"))?;
-        let mut ids: Vec<i32> = encoding.get_ids().iter().map(|&u| u as i32).collect();
+        let ids: Vec<i32> = encoding.get_ids().iter().map(|&u| u as i32).collect();
         let prompt_tokens = ids.len();
 
         let eos = self.config.eos_token_id as i32;
@@ -92,14 +92,19 @@ impl Engine for MlxEngine {
             .model
             .lock()
             .map_err(|_| anyhow!("model mutex poisoned"))?;
+
+        // Prefill the prompt on the first step; afterwards feed only the new
+        // token and let the KV cache stand in for the rest of the prefix.
+        let mut cache = crate::model::KvCache::new(self.config.num_hidden_layers);
+        let mut step: Vec<i32> = ids;
         let mut out: Vec<u32> = Vec::new();
         for _ in 0..params.max_tokens {
-            let next = model.forward_argmax(&ids)?;
+            let next = model.forward_argmax(&step, &mut cache)?;
             if next == eos || Some(next) == end_of_turn {
                 break;
             }
             out.push(next as u32);
-            ids.push(next);
+            step = vec![next];
         }
 
         let text = self
