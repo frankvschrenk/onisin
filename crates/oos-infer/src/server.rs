@@ -1,8 +1,9 @@
-//! The OpenAI-compatible HTTP surface, shared by every backend.
+//! The OpenAI-compatible HTTP surface -- the external face of the engine. The
+//! request path itself lives in `crate::complete`, shared with the NATS
+//! transport so both behave identically.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::State,
@@ -12,8 +13,8 @@ use axum::{
     Json, Router,
 };
 
-use crate::engine::{Engine, GenParams};
-use crate::openai::{ChatMessage, ChatRequest, ChatResponse, Choice, ModelCard, ModelList, Usage};
+use crate::engine::Engine;
+use crate::openai::{ChatRequest, ChatResponse, ModelList};
 
 type Shared = Arc<dyn Engine>;
 
@@ -34,59 +35,14 @@ pub async fn serve(addr: SocketAddr, engine: Shared) -> anyhow::Result<()> {
 }
 
 async fn list_models(State(engine): State<Shared>) -> Json<ModelList> {
-    Json(ModelList {
-        object: "list",
-        data: vec![ModelCard {
-            id: engine.model_id().to_string(),
-            object: "model",
-            owned_by: "onisin",
-        }],
-    })
+    Json(crate::complete::models(&engine))
 }
 
 async fn chat_completions(
     State(engine): State<Shared>,
     Json(req): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, AppError> {
-    let params = GenParams {
-        max_tokens: req.max_tokens.unwrap_or(512),
-        temperature: req.temperature.unwrap_or(0.7),
-        top_p: req.top_p.unwrap_or(0.95),
-    };
-    let model = req.model.clone();
-
-    // Generation is compute-bound and blocking; keep it off the async runtime.
-    let generation = tokio::task::spawn_blocking(move || engine.generate(&req.messages, &params))
-        .await
-        .map_err(|e| anyhow::anyhow!("generation task failed: {e}"))?;
-    let generation = generation?;
-
-    Ok(Json(ChatResponse {
-        id: format!("chatcmpl-{}", now()),
-        object: "chat.completion",
-        created: now(),
-        model,
-        choices: vec![Choice {
-            index: 0,
-            message: ChatMessage {
-                role: "assistant".to_string(),
-                content: generation.text,
-            },
-            finish_reason: "stop".to_string(),
-        }],
-        usage: Usage {
-            prompt_tokens: generation.prompt_tokens,
-            completion_tokens: generation.completion_tokens,
-            total_tokens: generation.prompt_tokens + generation.completion_tokens,
-        },
-    }))
-}
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    Ok(Json(crate::complete::chat(engine, req).await?))
 }
 
 /// Wraps any error into a JSON 500 so handlers can use `?`.

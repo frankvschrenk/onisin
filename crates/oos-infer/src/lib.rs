@@ -7,7 +7,9 @@
 //! expose the same surface and a customer can swap hardware without changing
 //! how they call onisin.
 
+pub mod complete;
 pub mod engine;
+pub mod nats;
 pub mod openai;
 pub mod registry;
 pub mod server;

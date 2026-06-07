@@ -2475,7 +2475,9 @@ name = "oos-infer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats",
  "axum",
+ "futures",
  "hf-hub",
  "serde",
  "serde_json",
