@@ -1,0 +1,31 @@
+[package]
+name = "oosiam"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "oosiam"
+path = "src/main.rs"
+
+[dependencies]
+oos-svc = { workspace = true }
+anyhow = { workspace = true }
+async-nats = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+# oosiam-specific (it is the only HTTP/auth-server service): the OAuth2
+# redirect dance needs an HTTP listener, and token signing needs RSA +
+# hashing. These are not in the shared workspace deps because no other
+# service uses them.
+axum = "0.8"
+rsa = "0.9"
+sha2 = { version = "0.10", features = ["oid"] }
+rand = "0.8"
+argon2 = "0.5"
+data-encoding = "2"
