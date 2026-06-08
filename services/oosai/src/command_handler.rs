@@ -6,6 +6,13 @@
 //! Tauri webview will talk these subjects directly over NATS-over-WS
 //! once oosd is migrated, replacing the old Electrobun RPC gateway.
 //!
+//! It also serves the oos agent's read-only RAG index subjects
+//! (oos.cmd.global, oos.cmd.domains): they share this handler's pool,
+//! queue group and per-message dispatch, so a second subscription loop
+//! would buy nothing. oos.cmd.views and oos.cmd.search are deliberately
+//! not here yet — views needs the view parser (deferred) and search
+//! needs the embed client (the next slice).
+//!
 //! Why a queue group: without `oosai-cmd`, NATS fans every request out
 //! to *all* subscribers on the subject. For a write handler that means
 //! each subscriber runs the INSERT and only one reply reaches the
@@ -13,19 +20,24 @@
 //! subscriber per request, even with several oosai processes (or a
 //! stale + fresh subscriber inside one `--hot` process).
 //!
-//! DSL boundary (Path A, same line as oosgql): the `*.save` handlers
-//! persist the source row for real, but the chunk re-embed is deferred
-//! — it needs renderLLMChunk (domain) / parseView+renderViewChunk
-//! (view), neither of which is ported to oos-dsls yet. The editor's
-//! Save therefore works end-to-end; only the RAG schema row lags until
-//! the renderer slice lands and the domain/view backfill re-embeds.
+//! DSL boundary: `domain.save` now persists the source row *and*
+//! re-embeds its RAG chunk on the spot (parse_domain + render_llm_chunk
+//! are ported), so an edit in oosd is searchable via oos.cmd.search
+//! without a restart. `view.save` still only persists the source — its
+//! chunk re-embed waits on parseView + renderViewChunk, which need a
+//! view parser in oos-dsls (not ported yet).
 
 use async_nats::{Client, Subscriber};
 use futures::StreamExt;
 use serde_json::{json, Value};
 use sqlx::{PgPool, Row};
 
+use std::sync::Arc;
+
 use anyhow::{anyhow, Result};
+
+use crate::embed::EmbedClient;
+use crate::{backfill, domain_index, global_store, view_index};
 
 /// Shared queue group for every command subscription.
 const QUEUE: &str = "oosai-cmd";
@@ -51,32 +63,37 @@ const SUBJECTS: &[&str] = &[
     "oos.cmd.event_mappings.list",
     "oos.cmd.event_mappings.set_types",
     "oos.cmd.event.refresh",
+    // RAG index subjects for the oos agent's system prompt (read-only).
+    "oos.cmd.global",
+    "oos.cmd.domains",
+    "oos.cmd.views",
 ];
 
 /// Subscribes to all command subjects in the queue group and spawns a
 /// serving task per subject. Returns once the subscriptions are live;
 /// the tasks run until the process exits.
-pub async fn serve(client: Client, pool: PgPool) -> Result<()> {
+pub async fn serve(client: Client, pool: PgPool, embed: Arc<EmbedClient>) -> Result<()> {
     for &subject in SUBJECTS {
         let sub = client
             .queue_subscribe(subject.to_string(), QUEUE.to_string())
             .await?;
-        tokio::spawn(run_subject(client.clone(), pool.clone(), sub));
+        tokio::spawn(run_subject(client.clone(), pool.clone(), embed.clone(), sub));
     }
-    println!("[oosai] listening on oos.cmd.{{domain,view,event_type_grammar,event_mappings}}.* + event.refresh (queue {QUEUE})");
+    println!("[oosai] listening on oos.cmd.{{domain,view,event_type_grammar,event_mappings}}.* + event.refresh + global/domains/views (queue {QUEUE})");
     Ok(())
 }
 
 /// One subscription loop. Each message is dispatched in its own task so
 /// a slow query never stalls the subscription or the sibling subjects
 /// (same lesson as the old bench `for await` dispatcher).
-async fn run_subject(client: Client, pool: PgPool, mut sub: Subscriber) {
+async fn run_subject(client: Client, pool: PgPool, embed: Arc<EmbedClient>, mut sub: Subscriber) {
     while let Some(msg) = sub.next().await {
         let Some(reply) = msg.reply.clone() else { continue };
         let client = client.clone();
         let pool = pool.clone();
+        let embed = embed.clone();
         tokio::spawn(async move {
-            let value = match handle(&pool, msg.subject.as_str(), &msg.payload).await {
+            let value = match handle(&pool, &embed, msg.subject.as_str(), &msg.payload).await {
                 Ok(v) => v,
                 // Logical + transport errors come back in-band as
                 // {ok:false,error}; the old clients tolerate this even
@@ -93,7 +110,12 @@ async fn run_subject(client: Client, pool: PgPool, mut sub: Subscriber) {
 /// Routes one command to its SQL and returns the reply payload. The
 /// reply shapes mirror the Bun handler exactly so the existing oosd
 /// frontend types stay valid.
-async fn handle(pool: &PgPool, subject: &str, payload: &[u8]) -> Result<Value> {
+async fn handle(
+    pool: &PgPool,
+    embed: &Arc<EmbedClient>,
+    subject: &str,
+    payload: &[u8],
+) -> Result<Value> {
     let body: Value = if payload.is_empty() {
         json!({})
     } else {
@@ -108,10 +130,23 @@ async fn handle(pool: &PgPool, subject: &str, payload: &[u8]) -> Result<Value> {
         }
         "oos.cmd.domain.save" => {
             let id = str_field(&body, "id")?;
-            save_source(pool, "oos.domain", id, str_field(&body, "source")?).await?;
-            // Path A: source persisted; chunk re-embed waits on the
-            // domain renderer (renderLLMChunk) port.
-            println!("[oosai/cmd] domain.save {id}: source stored, chunk embed deferred (renderer not ported)");
+            let source = str_field(&body, "source")?;
+            save_source(pool, "oos.domain", id, source).await?;
+            // Re-embed the RAG chunk so an edit in oosd is searchable via
+            // oos.cmd.search without an oosai restart. Best-effort and
+            // decoupled from the save's success: a source that doesn't
+            // parse yet (saved mid-edit) still persists; its chunk just
+            // stays stale until the next save that parses. We never fail
+            // the save on a render/embed error — the source row is the
+            // editor's source of truth, the chunk is a derived cache.
+            match backfill::reembed_domain(pool, embed, source).await {
+                Ok(name) => {
+                    println!("[oosai/cmd] domain.save {id}: source stored + chunk re-embedded ({name})")
+                }
+                Err(e) => {
+                    eprintln!("[oosai/cmd] domain.save {id}: source stored, chunk re-embed skipped: {e}")
+                }
+            }
             json!({ "ok": true })
         }
         "oos.cmd.domain.delete" => {
@@ -128,8 +163,21 @@ async fn handle(pool: &PgPool, subject: &str, payload: &[u8]) -> Result<Value> {
         }
         "oos.cmd.view.save" => {
             let id = str_field(&body, "id")?;
-            save_source(pool, "oos.view", id, str_field(&body, "source")?).await?;
-            println!("[oosai/cmd] view.save {id}: source stored, chunk embed deferred (view parser not ported)");
+            let source = str_field(&body, "source")?;
+            save_source(pool, "oos.view", id, source).await?;
+            // Re-embed the view chunk so an edit in oosd is resolver-
+            // visible (oos.cmd.views) and embedded without a restart.
+            // Best-effort, same contract as domain.save: a source that
+            // doesn't parse yet still persists, its chunk stays stale
+            // until the next save that parses; we never fail the save.
+            match backfill::reembed_view(pool, embed, source).await {
+                Ok(name) => {
+                    println!("[oosai/cmd] view.save {id}: source stored + chunk re-embedded ({name})")
+                }
+                Err(e) => {
+                    eprintln!("[oosai/cmd] view.save {id}: source stored, chunk re-embed skipped: {e}")
+                }
+            }
             json!({ "ok": true })
         }
         "oos.cmd.view.delete" => {
@@ -248,6 +296,14 @@ async fn handle(pool: &PgPool, subject: &str, payload: &[u8]) -> Result<Value> {
                 .await?;
             json!({ "ok": true })
         }
+
+        // ── RAG index (oos agent system prompt) ───────────────────
+        // Read-only. global returns every standing-instruction chunk;
+        // domains returns the rich one-entry-per-domain catalogue the
+        // resolver/prompt need (replaces the lean {ids} of domain.list).
+        "oos.cmd.global" => json!({ "prompts": global_store::list_chunks(pool).await? }),
+        "oos.cmd.domains" => json!({ "domains": domain_index::load_domain_index(pool).await? }),
+        "oos.cmd.views" => json!({ "views": view_index::load_view_index(pool).await? }),
 
         // ── Event refresh ─────────────────────────────────────────
         // oosd fires this after admin DDL so the listener re-subscribes

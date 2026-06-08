@@ -3,27 +3,38 @@
 //! Migration slice so far: connects to NATS, reads config from the
 //! JetStream KV bucket oos-ai/config, serves the generic embedding
 //! subjects (oos.cmd.embed[.batch|.meta]) wire-compatibly, runs the
-//! global-prompt schema backfill into pgvector, ticks a heartbeat on
-//! status.oosai, and answers oos.cmd.oosai.env.show.
+//! global + domain + view schema backfill into pgvector, ticks a
+//! heartbeat on status.oosai, and answers oos.cmd.oosai.env.show.
 //!
 //! Also serves the oosd designer's admin command surface (CRUD over
 //! oos.domain / oos.view / event_type_grammar / event_mappings) via
 //! command_handler, so the migrated Tauri oosd can talk these subjects
 //! over NATS-over-WS directly.
 //!
-//! Not ported yet: domain/view *chunk re-embed* on save + backfill (need
-//! renderLLMChunk / parseView from oos-dsls), the notify/event listeners,
-//! the Hono HTTP/SSE bus, and the pipeline-runner. nodeId is empty until
-//! oos-node-id-ts is ported.
+//! Domains and views both reconcile on boot and re-embed on save
+//! (oos.cmd.{domain,view}.save); the view index is served on
+//! oos.cmd.views for the agent's pre-LLM resolver. View chunks are
+//! embedded but, like the Bun original, are not unioned into
+//! oos.cmd.search — the agent reaches views through the resolver hint,
+//! not semantic search.
+//!
+//! Not ported yet: the notify/event listeners, the Hono HTTP/SSE bus,
+//! and the pipeline-runner. nodeId is empty until oos-node-id-ts is
+//! ported.
 
 mod backfill;
 mod command_handler;
 mod config;
+mod domain_index;
+mod domain_store;
 mod embed;
 mod error;
 mod global_store;
 mod nats_embed;
+mod search;
 mod vector;
+mod view_index;
+mod view_store;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,6 +92,14 @@ async fn main() -> anyhow::Result<()> {
                 Ok(c) => println!("[oosai] backfill global: embedded={} pruned={}", c.embedded, c.pruned),
                 Err(e) => eprintln!("[oosai] global backfill skipped: {e}"),
             }
+            match backfill::run_domains(&pool, &embed).await {
+                Ok(c) => println!("[oosai] backfill domains: embedded={} pruned={}", c.embedded, c.pruned),
+                Err(e) => eprintln!("[oosai] domain backfill skipped: {e}"),
+            }
+            match backfill::run_views(&pool, &embed).await {
+                Ok(c) => println!("[oosai] backfill views: embedded={} pruned={}", c.embedded, c.pruned),
+                Err(e) => eprintln!("[oosai] view backfill skipped: {e}"),
+            }
             Some(pool)
         }
         Err(e) => {
@@ -93,11 +112,13 @@ async fn main() -> anyhow::Result<()> {
     let mut show_entries = cfg.entries.clone();
     show_entries.push(EnvEntry::runtime("embed.vectorDim", vector_dim.to_string()));
 
-    nats_embed::serve(client.clone(), embed, vector_dim).await?;
-    // Command handler needs Postgres; when the DB is down its subjects
-    // simply aren't served (callers time out) while embeddings stay up.
+    nats_embed::serve(client.clone(), embed.clone(), vector_dim).await?;
+    // Command handler + search need Postgres; when the DB is down their
+    // subjects simply aren't served (callers time out) while embeddings
+    // stay up. search also needs the embed client to vectorise queries.
     if let Some(pool) = &pg_pool {
-        command_handler::serve(client.clone(), pool.clone()).await?;
+        command_handler::serve(client.clone(), pool.clone(), embed.clone()).await?;
+        search::serve(client.clone(), pool.clone(), embed.clone()).await?;
     }
     oos_svc::env_show::serve(client.clone(), "oosai", show_entries).await?;
     oos_svc::heartbeat::start(client.clone(), "oosai", VERSION, "");

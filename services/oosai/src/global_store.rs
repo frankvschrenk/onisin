@@ -8,6 +8,7 @@
 //! embedding is serialised via vector::format_vector and cast to
 //! ::vector server-side.
 
+use serde::Serialize;
 use sqlx::{PgPool, Row};
 
 use crate::vector::format_vector;
@@ -48,4 +49,29 @@ pub async fn list_keys(pool: &PgPool) -> anyhow::Result<Vec<String>> {
         .fetch_all(pool)
         .await?;
     Ok(rows.iter().map(|r| r.get::<String, _>("name")).collect())
+}
+
+/// One stored global chunk: the standing-instruction prompt name and
+/// its rendered chunk text.
+#[derive(Debug, Clone, Serialize)]
+pub struct GlobalChunkRow {
+    pub name: String,
+    pub chunk: String,
+}
+
+/// Returns every stored global chunk, alphabetical by name. The oos
+/// agent loads these in one shot to seed its system prompt with every
+/// standing instruction, rather than making N separate reads (port of
+/// the Bun listGlobalChunks).
+pub async fn list_chunks(pool: &PgPool) -> anyhow::Result<Vec<GlobalChunkRow>> {
+    let rows = sqlx::query("SELECT name, chunk FROM oos.oos_global_schema ORDER BY name")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|r| GlobalChunkRow {
+            name: r.get::<String, _>("name"),
+            chunk: r.get::<String, _>("chunk"),
+        })
+        .collect())
 }

@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 oos-svc = { workspace = true }
+oos-dsls = { workspace = true }
 anyhow = { workspace = true }
 async-nats = { workspace = true }
 futures = { workspace = true }
