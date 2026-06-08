@@ -18,7 +18,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{anyhow, Context, Result};
-use mlx_rs::{fast, nn, ops, Array};
+use mlx_rs::{fast, nn, ops, Array, Dtype};
 use oos_infer::openai::ChatMessage;
 use oos_infer::ModelFiles;
 use serde::Deserialize;
@@ -127,16 +127,22 @@ impl Gemma4Config {
     }
 }
 
-/// An affine-quantized linear weight, stored exactly as the checkpoint packs
-/// it: `weight` is bit-packed u32 (never cast), `scales`/`biases` carry the
-/// per-group affine params. HF lays weights out as `[out, in]`, so the matmul
-/// transposes.
+/// A quantized linear weight, stored exactly as the checkpoint packs it:
+/// `weight` is bit-packed u32 (never cast), `scales` (and `biases`, for affine)
+/// carry the per-group params. The format is config-driven, so block-scaled
+/// modes like mxfp4 -- which carry no biases -- load through the same struct.
+/// HF lays weights out as `[out, in]`, so the matmul transposes.
 struct QLinear {
     weight: Array,
     scales: Array,
-    biases: Array,
+    /// `None` for biasless formats (mxfp4/mxfp8); affine carries per-group biases.
+    biases: Option<Array>,
     group_size: i32,
     bits: i32,
+    /// Quantization mode from config.json (e.g. "affine", "mxfp4"); `None` is
+    /// the affine default. Threaded into every quantized op so the format --
+    /// not the architecture -- decides the math.
+    mode: Option<String>,
 }
 
 impl QLinear {
@@ -145,28 +151,102 @@ impl QLinear {
             x,
             &self.weight,
             &self.scales,
-            Some(&self.biases),
+            self.biases.as_ref(),
             true,
             self.group_size,
             self.bits,
-            None,
+            self.mode.as_deref(),
         )?)
     }
 }
 
-/// Affine group size is uniform (64); only the bit width varies per path:
-/// the shared MLP projections and the router are 8-bit, everything else 4-bit.
-fn bits_for(path: &str) -> i32 {
-    let eight = [
-        ".mlp.gate_proj",
-        ".mlp.up_proj",
-        ".mlp.down_proj",
-        ".router.proj",
-    ];
-    if eight.iter().any(|s| path.contains(s)) {
-        8
-    } else {
-        4
+/// Per-path quantization spec, read from config.json's `quantization` block
+/// rather than hardcoded per-path bit widths. This keeps the loader
+/// format-driven and architecture-independent: the checkpoint declares each
+/// module's group_size/bits/mode, so a future mxfp4 model loads with no code
+/// change here.
+///
+/// The block is a flat map of scalar globals (`group_size`/`bits`/`mode`) plus
+/// per-module overrides keyed by the exact tensor prefix. Overrides carry only
+/// the fields they change; the rest inherit the global.
+struct QuantConfig {
+    mode: Option<String>,
+    group_size: i32,
+    bits: i32,
+    /// Per-prefix (group_size, bits) overrides; keys match the prefix passed
+    /// to `spec_for` verbatim.
+    overrides: HashMap<String, (i32, i32)>,
+}
+
+impl QuantConfig {
+    fn load(path: &Path) -> Result<Self> {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let root: serde_json::Value = serde_json::from_str(&text)
+            .with_context(|| format!("parsing {}", path.display()))?;
+        // mlx-community ships the block under both keys; they are identical.
+        let block = root
+            .get("quantization")
+            .or_else(|| root.get("quantization_config"))
+            .and_then(|v| v.as_object())
+            .ok_or_else(|| anyhow!("config.json has no quantization block"))?;
+
+        // Pass 1: scalar globals. Defaults reproduce the prior hardcoded
+        // behavior (group 64 / 4-bit) if a field is absent.
+        let mut group_size: i32 = 64;
+        let mut bits: i32 = 4;
+        let mut mode: Option<String> = None;
+        for (k, v) in block {
+            match (k.as_str(), v) {
+                ("group_size", serde_json::Value::Number(n)) => {
+                    if let Some(x) = n.as_i64() {
+                        group_size = x as i32;
+                    }
+                }
+                ("bits", serde_json::Value::Number(n)) => {
+                    if let Some(x) = n.as_i64() {
+                        bits = x as i32;
+                    }
+                }
+                ("mode", serde_json::Value::String(s)) => mode = Some(s.clone()),
+                _ => {}
+            }
+        }
+
+        // Pass 2: per-module overrides; missing fields inherit the global.
+        // Two passes so resolution is independent of JSON key ordering.
+        let mut overrides = HashMap::new();
+        for (k, v) in block {
+            if let serde_json::Value::Object(o) = v {
+                let gs = o
+                    .get("group_size")
+                    .and_then(|x| x.as_i64())
+                    .map(|x| x as i32)
+                    .unwrap_or(group_size);
+                let b = o
+                    .get("bits")
+                    .and_then(|x| x.as_i64())
+                    .map(|x| x as i32)
+                    .unwrap_or(bits);
+                overrides.insert(k.clone(), (gs, b));
+            }
+        }
+
+        Ok(Self {
+            mode,
+            group_size,
+            bits,
+            overrides,
+        })
+    }
+
+    /// Resolve (group_size, bits) for a tensor prefix: an exact-match override
+    /// if the checkpoint declared one, else the global default.
+    fn spec_for(&self, prefix: &str) -> (i32, i32) {
+        self.overrides
+            .get(prefix)
+            .copied()
+            .unwrap_or((self.group_size, self.bits))
     }
 }
 
@@ -291,13 +371,31 @@ impl Gemma4Model {
                 .cloned()
                 .ok_or_else(|| anyhow!("missing tensor {name}"))
         };
+        let qcfg = QuantConfig::load(&files.config_json).context("loading gemma4 quant config")?;
         let qlinear = |prefix: &str| -> Result<QLinear> {
+            let (group_size, bits) = qcfg.spec_for(prefix);
+            // Biasless formats (mxfp4/mxfp8) ship no `.biases` tensor; affine does.
+            let biases = match w.get(&format!("{prefix}.biases")) {
+                Some(a) => Some(a.as_type::<f32>()?),
+                None => None,
+            };
+            // Scales match the f32 activations for affine, but block-scaled
+            // formats (mxfp4/mxfp8) carry uint8 (e8m0) scales that the quantized
+            // ops require verbatim -- casting those to f32 breaks them. Cast only
+            // floating scales; leave integer (block-exponent) scales native.
+            let scales_raw = raw(&format!("{prefix}.scales"))?;
+            let scales = if scales_raw.dtype() == Dtype::Uint8 {
+                scales_raw
+            } else {
+                scales_raw.as_type::<f32>()?
+            };
             Ok(QLinear {
                 weight: raw(&format!("{prefix}.weight"))?,
-                scales: get(&format!("{prefix}.scales"))?,
-                biases: get(&format!("{prefix}.biases"))?,
-                group_size: 64,
-                bits: bits_for(prefix),
+                scales,
+                biases,
+                group_size,
+                bits,
+                mode: qcfg.mode.clone(),
             })
         };
 
@@ -421,13 +519,14 @@ fn gather(ql: &QLinear, x: &Array, idx: &Array) -> Result<Array> {
         x,
         &ql.weight,
         &ql.scales,
-        Some(&ql.biases),
+        ql.biases.as_ref(),
         None,
         Some(idx),
         true,
         ql.group_size,
         ql.bits,
-        None,
+        false,
+        ql.mode.as_deref(),
     )?)
 }
 
@@ -589,8 +688,15 @@ impl Gemma4Model {
         let ids = Array::from_slice(tokens, &[tokens.len() as i32]);
         let w = self.embed.weight.index(&ids);
         let s = self.embed.scales.index(&ids);
-        let b = self.embed.biases.index(&ids);
-        let h = ops::dequantize(&w, &s, Some(&b), self.embed.group_size, self.embed.bits, None)?;
+        let b = self.embed.biases.as_ref().map(|bz| bz.index(&ids));
+        let h = ops::dequantize(
+            &w,
+            &s,
+            b.as_ref(),
+            self.embed.group_size,
+            self.embed.bits,
+            self.embed.mode.as_deref(),
+        )?;
         let scale = Array::from_slice(&[self.cfg.embed_scale()], &[1]);
         Ok(h.multiply(&scale)?)
     }
@@ -637,5 +743,132 @@ impl Model for Gemma4Model {
 
     fn stop_tokens(&self) -> &[i32] {
         &self.stop
+    }
+}
+
+/// Format-path smoke for block-scaled quantization (mxfp4), run against a real
+/// checkpoint. It deliberately does *not* run a correct forward for the model's
+/// architecture: the point is that an mxfp4 weight loads through the
+/// format-driven `QuantConfig`/`QLinear` and computes through the vendored
+/// mlx-rs `mode` parameter -- proving the format path independently of whether
+/// we can yet run that architecture end to end.
+///
+/// Ignored by default and gated on `OOSMLX_MXFP4_SMOKE_MODEL` (a local model
+/// directory), because it needs real mxfp4 tensors on disk that CI lacks. Run:
+///   cargo test -p oosmlx --features mlx -- --ignored mxfp4_format_path
+#[cfg(test)]
+mod format_smoke {
+    use super::*;
+
+    /// Reduce an array to its scalar sum on-device, then read back that single
+    /// value -- lets us assert a large tensor is finite without copying it to
+    /// the host. Single-axis reductions only, matching the ops this module
+    /// already relies on elsewhere.
+    fn scalar_sum(a: &Array) -> Result<f32> {
+        let mut r = a.clone();
+        while !r.shape().is_empty() {
+            r = r.sum_axes(&[0], false)?;
+        }
+        r.eval()?;
+        Ok(r.item::<f32>())
+    }
+
+    #[test]
+    #[ignore = "needs a local mxfp4 model dir in OOSMLX_MXFP4_SMOKE_MODEL"]
+    fn mxfp4_format_path() -> Result<()> {
+        let dir = match std::env::var("OOSMLX_MXFP4_SMOKE_MODEL") {
+            Ok(d) => std::path::PathBuf::from(d),
+            Err(_) => {
+                eprintln!(
+                    "skipping mxfp4_format_path: set OOSMLX_MXFP4_SMOKE_MODEL \
+                     to a local mxfp4 model directory"
+                );
+                return Ok(());
+            }
+        };
+
+        // The loader reads the format straight from config.json; a real mxfp4
+        // checkpoint must resolve to mode=mxfp4, group 32, 4-bit.
+        let qcfg = QuantConfig::load(&dir.join("config.json"))?;
+        assert_eq!(qcfg.mode.as_deref(), Some("mxfp4"));
+        assert_eq!((qcfg.group_size, qcfg.bits), (32, 4));
+
+        let w = load_weights(&dir)?;
+
+        // Pick one biasless, non-embedding quantized linear. Biaslessness is the
+        // mxfp4 signature (affine ships `.biases`); the embedding table is
+        // skipped only to keep the smoke small. Sorted for a deterministic pick.
+        let mut prefixes: Vec<String> = w
+            .keys()
+            .filter_map(|k| k.strip_suffix(".scales").map(|p| p.to_string()))
+            .filter(|p| {
+                !p.contains("embed")
+                    && w.contains_key(&format!("{p}.weight"))
+                    && !w.contains_key(&format!("{p}.biases"))
+            })
+            .collect();
+        prefixes.sort();
+        let prefix = prefixes
+            .first()
+            .expect("no biasless quantized linear in checkpoint");
+
+        // Build the QLinear exactly as the loader does, driven by QuantConfig:
+        // detect biaslessness from the absent `.biases` tensor, carry the mode.
+        let (group_size, bits) = qcfg.spec_for(prefix);
+        let biases = match w.get(&format!("{prefix}.biases")) {
+            Some(a) => Some(a.as_type::<f32>()?),
+            None => None,
+        };
+        assert!(biases.is_none(), "mxfp4 linear unexpectedly carries biases");
+        let qlin = QLinear {
+            weight: w
+                .get(&format!("{prefix}.weight"))
+                .expect("weight present (filtered)")
+                .clone(),
+            scales: w
+                .get(&format!("{prefix}.scales"))
+                .expect("scales present (filtered)")
+                // mxfp4 scales are uint8 (e8m0 block exponents); casting them
+                // to f32 (the affine habit) makes quantized_matmul reject them.
+                .clone(),
+            biases,
+            group_size,
+            bits,
+            mode: qcfg.mode.clone(),
+        };
+
+        // HF packs `weight` as [out, in/(32/bits)] u32; the unpacked input width
+        // is what quantized_matmul expects on the activation side.
+        let out = qlin.weight.shape()[0];
+        let in_features = qlin.weight.shape()[1] * 32 / bits;
+
+        // (1) quantized_matmul with mode=mxfp4 on the real packed weight.
+        let x = Array::ones::<f32>(&[1, in_features])?;
+        let y = qlin.forward(&x)?;
+        assert_eq!(y.shape()[0], 1);
+        assert_eq!(y.shape()[1], out);
+        assert!(
+            scalar_sum(&y)?.is_finite(),
+            "mxfp4 matmul produced non-finite output"
+        );
+
+        // (2) dequantize roundtrip with mode=mxfp4: unpack the whole weight.
+        let deq = ops::dequantize(
+            &qlin.weight,
+            &qlin.scales,
+            qlin.biases.as_ref(),
+            group_size,
+            bits,
+            qlin.mode.as_deref(),
+        )?;
+        assert_eq!(deq.shape()[0], out);
+        assert_eq!(deq.shape()[1], in_features);
+        let s = scalar_sum(&deq)?;
+        assert!(
+            s.is_finite() && s != 0.0,
+            "dequantized mxfp4 weight is degenerate"
+        );
+
+        Ok(())
     }
 }
