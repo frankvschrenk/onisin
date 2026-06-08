@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Onisin Operator",
+  "productName": "Onisin OS - Operator",
   "version": "0.1.0",
   "identifier": "com.onisin.ooso",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Onisin Operator",
+        "title": "Onisin OS - Operator",
         "width": 1100,
         "height": 720,
         "minWidth": 800,
