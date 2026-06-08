@@ -1,0 +1,71 @@
+{
+  "name": "onisin-pipeline",
+  "scopeName": "source.onisin-pipeline",
+  "fileTypes": [
+    ".pipeline"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "name": "keyword.control.onisin-pipeline",
+      "match": "\\b(_and|_eq|_gt|_gte|_ilike|_in|_like|_lt|_lte|_neq|_not|_or|aggregate|context|db|docs|editor|embedding|file|from|input|limit|llm|mass|mode|nats|out|per-row|pipeline|prompt|query|semantic|source|step|subject|system|where)\\b|\\b(dsn=|uri=)\\B"
+    },
+    {
+      "name": "string.quoted.double.onisin-pipeline",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "include": "#string-character-escape"
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.onisin-pipeline",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "include": "#string-character-escape"
+        }
+      ]
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "begin": "//",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.whitespace.comment.leading.onisin-pipeline"
+            }
+          },
+          "end": "(?=$)",
+          "name": "comment.line.onisin-pipeline"
+        },
+        {
+          "name": "comment.block.onisin-pipeline",
+          "begin": "/\\*",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.onisin-pipeline"
+            }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.onisin-pipeline"
+            }
+          }
+        }
+      ]
+    },
+    "string-character-escape": {
+      "name": "constant.character.escape.onisin-pipeline",
+      "match": "\\\\(x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\\{[0-9A-Fa-f]+\\}|[0-2][0-7]{0,2}|3[0-6][0-7]?|37[0-7]?|[4-7][0-7]?|.|$)"
+    }
+  }
+}

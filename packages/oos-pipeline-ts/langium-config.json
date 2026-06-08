@@ -1,0 +1,17 @@
+{
+	"projectName": "OnisinPipeline",
+	"languages": [
+		{
+			"id": "onisin-pipeline",
+			"grammar": "grammar/pipeline.langium",
+			"fileExtensions": [".pipeline"],
+			"textMate": {
+				"out": "src/syntaxes/onisin-pipeline.tmLanguage.json"
+			},
+			"monarch": {
+				"out": "src/syntaxes/onisin-pipeline.monarch.ts"
+			}
+		}
+	],
+	"out": "src/generated"
+}
