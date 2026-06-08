@@ -1,0 +1,75 @@
+/* Third-party component styles */
+@import "@mantine/spotlight/styles.css";
+@import "@mantine/dates/styles.css";
+
+/* index.css — minimal global styles for the oos mainview.
+ *
+ * Mantine ships its own CSS (imported from index.tsx via the bundler);
+ * this file holds top-level resets and a couple of hover-driven
+ * utilities that aren't expressible via Mantine's style props.
+ */
+
+html, body, #root {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	width: 100%;
+}
+
+body {
+	/* Use the Mantine theme's font-family variable so changes in
+	 * theme propagate. The fallback chain in the variable handles
+	 * the "Inter is still loading" first paint. */
+	font-family: var(--mantine-font-family);
+	font-size: 14px;
+	/* font-smoothing intentionally left at browser default.
+	 * -webkit-font-smoothing: antialiased disables subpixel
+	 * rendering, which makes text crisper on Retina (>= 220 ppi)
+	 * but mushy on standard-density external monitors
+	 * (UWQHD/4K at 110-140 ppi). The default "auto" picks the
+	 * right strategy per display. */
+}
+
+/* The close button on a tab-rail item is hidden until the row is
+ * hovered. Keeps the rail visually quiet until the user reaches in.
+ */
+.tab-rail-item .tab-rail-close {
+	opacity: 0;
+	transition: opacity 80ms ease;
+}
+.tab-rail-item:hover .tab-rail-close {
+	opacity: 1;
+}
+
+/* Markdown rendered inside a chat bubble — collapse the default
+ * top/bottom margins of the first/last block so the bubble doesn't
+ * grow extra whitespace.
+ */
+.bubble-body > :first-child { margin-top: 0; }
+.bubble-body > :last-child  { margin-bottom: 0; }
+.bubble-body p              { margin: 0 0 6px 0; }
+.bubble-body p:last-child   { margin-bottom: 0; }
+.bubble-body code {
+	background: light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-7));
+	padding: 1px 4px;
+	border-radius: 3px;
+	font-size: 0.95em;
+}
+.bubble-body pre {
+	background: light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-7));
+	padding: 8px;
+	border-radius: 4px;
+	overflow-x: auto;
+	margin: 6px 0;
+}
+.bubble-body pre code {
+	background: transparent;
+	padding: 0;
+}
+
+/* Resize handle between the chat column and the tab workspace. */
+.oos-resize-handle:hover,
+.oos-resize-handle[data-resize-handle-active] {
+	background: var(--mantine-primary-color-filled) !important;
+}
+

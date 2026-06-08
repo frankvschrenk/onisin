@@ -1,0 +1,70 @@
+# Standalone workspace: this src-tauri is deliberately NOT a member of the
+# root /Users/frank/repro/onisin Rust workspace (services/ + crates/). The
+# empty [workspace] table detaches it so the Tauri binary keeps its own
+# Cargo.lock and target/, exactly like apps/oosd and the crypto reference
+# app \u2014 a `cargo` run here does not drag in the headless services.
+[workspace]
+
+[package]
+name = "oos"
+version = "1.0.0"
+edition = "2021"
+authors = ["Frank von Schrenk"]
+
+[lib]
+# Desktop entry point lives in the lib so the mobile entry-point macro can
+# reuse it; main.rs is a thin shim that calls oos_lib::run().
+name = "oos_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri-plugin-positioner = "2"
+tauri-plugin-window-state = "2"
+tauri = { version = "2.10.2", features = [] }
+tauri-plugin-opener = "2.5.3"
+tauri-plugin-store = "2.4.2"
+tauri-plugin-dialog = "2.6.0"
+tauri-plugin-fs = "2.4.5"
+tauri-plugin-os = "2"
+tauri-plugin-process = "2"
+
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+thiserror = "2.0.17"
+
+# list_models talks to an OpenAI-compatible /v1/models endpoint server-side
+# (no browser CORS, key stays out of fetch logs). rustls keeps the build
+# self-contained; json for response parsing.
+reqwest = { version = "0.12.4", default-features = false, features = ["json", "rustls-tls"] }
+
+# node_id mints a stable 52-char Base32 instance identity on first run and
+# persists it under the app-data dir. rand fills the 32 random bytes; the
+# Base32 (RFC4648, no padding) of 32 bytes is exactly 52 chars, matching the
+# old oos-node-id-ts contract the webview expects.
+rand = "0.8"
+data-encoding = "2"
+
+# PKCE: code_challenge = base64url(sha256(code_verifier)).
+sha2 = "0.10"
+
+# Token storage in the OS keychain via one cross-platform crate: macOS
+# Keychain, Windows Credential Manager, Linux secret-service. keyring v3
+# is the stable single-crate API (Entry::new + set/get/delete); v4 split
+# into keyring-core + per-OS store crates and is still stabilising, so we
+# stay on v3. Platform store selected per target.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
