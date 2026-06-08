@@ -25,6 +25,14 @@ use crate::engine::MlxEngine;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Handle help before anything else, so `--help`/`-h` (or no args) prints
+    // usage instead of being parsed as a model id and 404'ing against HF.
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    if raw.is_empty() || raw.iter().any(|a| a == "-h" || a == "--help") {
+        print_help();
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -32,10 +40,8 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let mut args = std::env::args().skip(1);
-    let model_arg = args
-        .next()
-        .context("usage: oosmlx <model-path-or-hf-repo[@revision]> [host:port]")?;
+    let mut args = raw.into_iter();
+    let model_arg = args.next().expect("args are non-empty (checked above)");
     let addr: SocketAddr = args
         .next()
         .unwrap_or_else(|| "127.0.0.1:8080".to_string())
@@ -65,4 +71,39 @@ async fn main() -> Result<()> {
         }
         Err(_) => http.await.context("http task")?,
     }
+}
+
+/// CLI usage. Kept next to the arg parsing in `main`; `--help`/`-h` and the
+/// no-args case route here instead of resolving the flag as a model.
+fn print_help() {
+    println!(
+        "oosmlx -- onisin inference engine (MLX backend, Apple Silicon)
+
+USAGE:
+    oosmlx <model> [host:port]
+    oosmlx --help
+
+ARGS:
+    <model>       Local model directory, or a Hugging Face repo id, optionally
+                  pinned as repo@revision. A path that exists on disk is loaded
+                  locally; anything else is fetched from Hugging Face.
+    [host:port]   Address for the HTTP API (default 127.0.0.1:8080).
+
+ENV:
+    NATS_URL            If set, also serve the internal NATS Request-Reply
+                        transport (e.g. nats://127.0.0.1:4222). HTTP is always on.
+    OOS_INFER_SUBJECT   NATS subject prefix (default oos.cmd.infer).
+    RUST_LOG            Log filter (default info).
+
+ENDPOINTS (OpenAI-compatible, always served over HTTP):
+    GET  /v1/models
+    POST /v1/chat/completions
+  When NATS_URL is set, the same two over NATS Request-Reply:
+    oos.cmd.infer.models    oos.cmd.infer.chat
+
+EXAMPLES:
+    oosmlx ~/models/gemma-4-26b-a4b-it-4bit
+    oosmlx mlx-community/gemma-3-1b-it-bf16 127.0.0.1:8088
+    NATS_URL=nats://127.0.0.1:4222 oosmlx ./my-model"
+    );
 }
