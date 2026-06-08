@@ -12,6 +12,7 @@
 //! are family-agnostic and shared by every `Model`.
 
 mod gemma3;
+mod gemma4;
 
 use std::path::Path;
 
@@ -156,9 +157,12 @@ fn detect_arch(config_json: &Path) -> Result<String> {
 /// Load the model for `files`, dispatching on its architecture.
 pub fn load(files: &ModelFiles, tokenizer: &Tokenizer) -> Result<Box<dyn Model>> {
     let arch = detect_arch(&files.config_json)?;
-    if arch.to_lowercase().contains("gemma3") {
+    let lower = arch.to_lowercase();
+    if lower.contains("gemma4") {
+        Ok(Box::new(gemma4::Gemma4Model::load(files, tokenizer)?))
+    } else if lower.contains("gemma3") {
         Ok(Box::new(gemma3::Gemma3Model::load(files, tokenizer)?))
     } else {
-        bail!("unsupported model architecture: {arch} (supported: gemma3)")
+        bail!("unsupported model architecture: {arch} (supported: gemma3, gemma4)")
     }
 }
