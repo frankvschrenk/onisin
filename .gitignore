@@ -10,7 +10,7 @@ dist-web/
 build/
 
 # ── Tauri generated + app bundles & release artifacts ──
-gen/schemas/
+**/gen/schemas/
 *.app
 *.dmg
 *.tar.zst
@@ -25,3 +25,6 @@ gen/schemas/
 .DS_Store
 .idea/
 .vscode/
+
+# ── oosiam runtime (RS256 signing key, local user store) ──
+.oosiam/
