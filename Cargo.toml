@@ -1,5 +1,7 @@
 [workspace]
 resolver = "2"
+# vendor/ holds the vendored mlx-rs fork, which is its own workspace.
+exclude = ["vendor"]
 members = ["crates/oos-svc", "crates/oos-dsls", "services/oosai", "services/oosgql", "services/oosagent", "services/oosiam", "services/bench-nats", "services/oosmem", "tools/oosrun", "crates/oos-infer", "services/oosmlx"]
 
 [workspace.package]
@@ -27,3 +29,11 @@ oos-dsls = { path = "crates/oos-dsls" }
 opt-level = "z"
 lto = true
 strip = true
+
+# Vendored fork of mlx-rs `main` (see vendor/mlx-rs). Upstream mlx-rs 0.25.3 is
+# affine-only; `main` bundles a mxfp4-capable mlx-c (v0.5.0 -> MLX v0.30.6) but
+# still hard-codes the "affine" quant mode in its safe wrappers. Our fork threads
+# an optional `mode` through quantize/quantized_matmul/dequantize so we can drive
+# mxfp4/mxfp8 on Apple silicon (default stays affine). Default features incl. metal.
+[patch.crates-io]
+mlx-rs = { path = "vendor/mlx-rs/mlx-rs" }

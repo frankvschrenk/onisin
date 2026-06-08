@@ -183,7 +183,7 @@ impl Layer {
         let klen = k.shape()[2];
         let mask = attention_mask(offset, seq, klen, self.sliding_window);
         let mask = fast::ScaledDotProductAttentionMask::Array(&mask);
-        let o = fast::scaled_dot_product_attention(&q, &k, &v, cfg.attn_scale(), Some(mask))?;
+        let o = fast::scaled_dot_product_attention(&q, &k, &v, cfg.attn_scale(), Some(mask), None)?;
 
         let o = o.transpose_axes(&[0, 2, 1, 3])?.reshape(&[seq, n * hd])?;
         linear(&o, &self.o_proj)
