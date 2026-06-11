@@ -278,13 +278,23 @@ impl QuantConfig {
         } else {
             scales_raw.as_type::<f32>()?
         };
+        // Mixed checkpoints (e.g. qat-nvfp4: fp4 attention/experts plus
+        // affine 8-bit dense MLP) declare per-module overrides without a
+        // mode field, so the mode is read off the tensors instead: only
+        // affine ships per-group biases, every block-scaled format
+        // (nvfp4/mxfp4/mxfp8) is biasless.
+        let mode = if biases.is_some() {
+            None
+        } else {
+            self.mode.clone()
+        };
         Ok(QLinear {
             weight: fetch(format!("{prefix}.weight"))?,
             scales,
             biases,
             group_size,
             bits,
-            mode: self.mode.clone(),
+            mode,
         })
     }
 }
