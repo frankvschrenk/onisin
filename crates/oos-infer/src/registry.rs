@@ -65,7 +65,9 @@ pub fn resolve(model: &ModelRef) -> Result<ModelFiles> {
                 RepoType::Model,
                 revision.clone(),
             ));
-            let tokenizer_json = handle.get("tokenizer.json").context("fetch tokenizer.json")?;
+            let tokenizer_json = handle
+                .get("tokenizer.json")
+                .context("fetch tokenizer.json")?;
             let config_json = handle.get("config.json").context("fetch config.json")?;
             let dir = tokenizer_json
                 .parent()
@@ -93,7 +95,11 @@ pub fn list_hf_cache_models() -> Vec<String> {
     };
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let Some(repo) = name.to_string_lossy().strip_prefix("models--").map(str::to_owned) else {
+        let Some(repo) = name
+            .to_string_lossy()
+            .strip_prefix("models--")
+            .map(str::to_owned)
+        else {
             continue;
         };
         if !snapshot_has_config(&entry.path()) {
