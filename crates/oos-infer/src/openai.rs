@@ -17,6 +17,13 @@ pub struct ChatRequest {
     /// (SSE frames over HTTP) instead of one chat.completion object.
     #[serde(default)]
     pub stream: bool,
+    /// NATS extension: the subject chunks are published to while generation
+    /// runs (requires `stream: true`). Request-Reply stays untouched -- the
+    /// full ChatResponse still arrives as the reply, doubling as completion
+    /// signal -- so streaming over NATS is purely additive, and the chunk
+    /// objects match the SSE frames exactly. Ignored over HTTP.
+    #[serde(default)]
+    pub stream_subject: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

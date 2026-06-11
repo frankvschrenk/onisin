@@ -7,6 +7,14 @@
 //!   - `{prefix}.chat`   request: ChatRequest -> reply: ChatResponse
 //!   - `{prefix}.models` request: (ignored)   -> reply: ModelList
 //!
+//! Streaming: a chat request with `stream: true` and a `stream_subject` gets
+//! chat.completion.chunk objects (the same ones the HTTP transport frames as
+//! SSE) published to that subject while generation runs; the final reply is
+//! still the complete ChatResponse, doubling as the completion signal. The
+//! client picks the subject (typically inbox-style per request) and
+//! subscribes before sending. `stream: true` without a subject falls back to
+//! a plain reply, so foreign OpenAI payloads keep working.
+//!
 //! A failed request replies with `{"error": {"message": ...}}` rather than
 //! dropping the reply, so the caller sees the failure instead of timing out.
 
@@ -17,7 +25,7 @@ use futures::StreamExt;
 
 use crate::complete;
 use crate::engine::Engine;
-use crate::openai::ChatRequest;
+use crate::openai::{ChatChunk, ChatMessage, ChatRequest, ChatResponse, Choice, Usage};
 
 /// Connect to NATS and serve until the process stops.
 ///
@@ -60,7 +68,7 @@ pub async fn serve(url: String, prefix: String, engine: Arc<dyn Engine>) -> Resu
             let client = client.clone();
             let engine = engine.clone();
             tokio::spawn(async move {
-                let body = handle_chat(engine, &msg.payload).await;
+                let body = handle_chat(client.clone(), engine, &msg.payload).await;
                 if let Err(e) = client.publish(reply, body.into()).await {
                     tracing::error!(error = %e, "publishing chat reply");
                 }
@@ -80,21 +88,101 @@ pub async fn serve(url: String, prefix: String, engine: Arc<dyn Engine>) -> Resu
 }
 
 /// Run one chat request, returning the JSON reply bytes (response or error).
-async fn handle_chat(engine: Arc<dyn Engine>, payload: &[u8]) -> Vec<u8> {
-    let result = async {
-        let req: ChatRequest =
-            serde_json::from_slice(payload).context("parsing chat request")?;
-        complete::chat(engine, req).await
+async fn handle_chat(
+    client: async_nats::Client,
+    engine: Arc<dyn Engine>,
+    payload: &[u8],
+) -> Vec<u8> {
+    let req: ChatRequest = match serde_json::from_slice(payload).context("parsing chat request") {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::error!(error = %e, "chat request failed");
+            return error_json(&e.to_string());
+        }
+    };
+    if req.stream {
+        if let Some(subject) = req.stream_subject.clone().filter(|s| !s.is_empty()) {
+            return stream_chat(client, engine, req, subject).await;
+        }
     }
-    .await;
-
-    match result {
+    match complete::chat(engine, req).await {
         Ok(resp) => serde_json::to_vec(&resp).unwrap_or_else(|e| error_json(&e.to_string())),
         Err(e) => {
             tracing::error!(error = %e, "chat request failed");
             error_json(&e.to_string())
         }
     }
+}
+
+/// Forward chunks to the client's stream subject while assembling the final
+/// ChatResponse for the reply from the very same chunks -- one source of
+/// truth, no second accounting path.
+async fn stream_chat(
+    client: async_nats::Client,
+    engine: Arc<dyn Engine>,
+    req: ChatRequest,
+    subject: String,
+) -> Vec<u8> {
+    let mut rx = complete::chat_stream(engine, req);
+    let mut content = String::new();
+    while let Some(item) = rx.recv().await {
+        match item {
+            Ok(chunk) => {
+                let bytes = serde_json::to_vec(&chunk).unwrap_or_default();
+                // Chunk publishes are fire-and-forget: the reply is the
+                // authoritative result, a lost chunk only costs smoothness.
+                if let Err(e) = client.publish(subject.clone(), bytes.into()).await {
+                    tracing::warn!(error = %e, %subject, "publishing stream chunk");
+                }
+                let ChatChunk {
+                    id,
+                    created,
+                    model,
+                    choices,
+                    usage,
+                    ..
+                } = chunk;
+                let Some(choice) = choices.into_iter().next() else {
+                    continue;
+                };
+                if let Some(piece) = choice.delta.content {
+                    content.push_str(&piece);
+                }
+                if let Some(finish) = choice.finish_reason {
+                    let resp = ChatResponse {
+                        id,
+                        object: "chat.completion",
+                        created,
+                        model,
+                        choices: vec![Choice {
+                            index: 0,
+                            message: ChatMessage {
+                                role: "assistant".to_string(),
+                                content: std::mem::take(&mut content),
+                            },
+                            finish_reason: finish,
+                        }],
+                        usage: usage.unwrap_or(Usage {
+                            prompt_tokens: 0,
+                            completion_tokens: 0,
+                            total_tokens: 0,
+                        }),
+                    };
+                    return serde_json::to_vec(&resp)
+                        .unwrap_or_else(|e| error_json(&e.to_string()));
+                }
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "streamed chat request failed");
+                let body = error_json(&e.to_string());
+                // The error goes to both: subscribers of the stream subject
+                // must not wait for chunks that will never come.
+                let _ = client.publish(subject.clone(), body.clone().into()).await;
+                return body;
+            }
+        }
+    }
+    error_json("stream ended without a finish chunk")
 }
 
 /// `{"error": {"message": msg}}` as bytes, matching the HTTP error shape.
