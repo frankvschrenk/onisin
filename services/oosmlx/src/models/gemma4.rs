@@ -26,7 +26,7 @@ use std::path::Path;
 use tokenizers::Tokenizer;
 
 use super::gemma4_assistant::SharedKv;
-use super::{KvCache, Model};
+use super::{toolfmt, KvCache, Model};
 
 /// Gemma 4 text-tower parameters, parsed from config.json's `text_config`.
 ///
@@ -800,7 +800,12 @@ impl Model for Gemma4Model {
         Ok(logits.index(tokens.len() as i32 - 1))
     }
 
-    fn render_prompt(&self, messages: &[ChatMessage], thinking: bool) -> String {
+    fn render_prompt(
+        &self,
+        messages: &[ChatMessage],
+        thinking: bool,
+        tools: &[oos_infer::openai::Tool],
+    ) -> String {
         // Gemma 4's own turn format, from the checkpoint's chat_template.jinja
         // (NOT gemma3's <start_of_turn>): turns are `<|turn>{role}` ...
         // `<turn|>`, and model turns carry a `thought` channel. Thinking is
@@ -814,7 +819,7 @@ impl Model for Gemma4Model {
             .first()
             .map(|m| m.role == "system" || m.role == "developer")
             .unwrap_or(false);
-        if thinking || first_is_system {
+        if thinking || first_is_system || !tools.is_empty() {
             p.push_str("<|turn>system\n");
             if thinking {
                 // No newline after the marker: the community checkpoint's
@@ -828,10 +833,26 @@ impl Model for Gemma4Model {
                 p.push_str(messages[0].content.trim());
                 rest = &messages[1..];
             }
+            // Tool declarations close the system turn, after any system text.
+            for tool in tools {
+                p.push_str("<|tool>");
+                p.push_str(toolfmt::render_declaration(&tool.function).trim());
+                p.push_str("<tool|>");
+            }
             p.push_str("<turn|>\n");
         }
         let mut prev_role: Option<&str> = None;
-        for m in rest {
+        // A model turn the template left open after tool traffic: generation
+        // (or the next assistant part) continues inside it, with no new
+        // `<|turn>model` and no thought-channel prefill.
+        let mut open_model_turn = false;
+        for (i, m) in rest.iter().enumerate() {
+            if m.role == "tool" {
+                // Consumed by the forward-scan of the assistant message that
+                // issued the calls; a stray tool message without one is
+                // dropped rather than mis-rendered as a turn.
+                continue;
+            }
             let role = if m.role == "assistant" {
                 "model"
             } else {
@@ -840,22 +861,66 @@ impl Model for Gemma4Model {
             // The template folds consecutive assistant messages into one model
             // turn: the duplicate opening marker is suppressed, each part
             // still closes with <turn|>.
-            if !(role == "model" && prev_role == Some("model")) {
+            let continued = role == "model" && (prev_role == Some("model") || open_model_turn);
+            if !continued {
                 p.push_str("<|turn>");
                 p.push_str(role);
                 p.push('\n');
             }
+            open_model_turn = false;
+            // Tool calls, then their results (OpenAI shape: consecutive
+            // role:tool messages after the assistant message that called),
+            // then any content -- the template's rendering order.
+            let mut rendered_calls = false;
+            let mut rendered_responses = false;
             if role == "model" {
-                p.push_str(&strip_thinking(&m.content));
-            } else {
-                p.push_str(m.content.trim());
+                if let Some(calls) = &m.tool_calls {
+                    for call in calls {
+                        p.push_str("<|tool_call>call:");
+                        p.push_str(&call.function.name);
+                        p.push('{');
+                        p.push_str(&toolfmt::render_call_args(&call.function.arguments));
+                        p.push_str("}<tool_call|>");
+                    }
+                    rendered_calls = !calls.is_empty();
+                    for follow in rest[i + 1..].iter().take_while(|f| f.role == "tool") {
+                        let name = follow
+                            .tool_call_id
+                            .as_deref()
+                            .and_then(|id| calls.iter().find(|c| c.id == id))
+                            .map(|c| c.function.name.as_str())
+                            .unwrap_or("unknown");
+                        p.push_str(&toolfmt::render_response_block(name, &follow.content));
+                        rendered_responses = true;
+                    }
+                }
             }
-            p.push_str("<turn|>\n");
+            let content = if role == "model" {
+                strip_thinking(&m.content)
+            } else {
+                m.content.trim().to_string()
+            };
+            let has_content = !content.is_empty();
+            p.push_str(&content);
+            // Turn close, as the template does it: a call still waiting for
+            // results primes an open `<|tool_response>`; results without
+            // trailing content leave the model turn open for continuation;
+            // anything else closes the turn.
+            if rendered_calls && !rendered_responses {
+                p.push_str("<|tool_response>");
+                open_model_turn = true;
+            } else if rendered_responses && !has_content {
+                open_model_turn = true;
+            } else {
+                p.push_str("<turn|>\n");
+            }
             prev_role = Some(role);
         }
-        p.push_str("<|turn>model\n");
-        if !thinking {
-            p.push_str("<|channel>thought\n<channel|>");
+        if !open_model_turn {
+            p.push_str("<|turn>model\n");
+            if !thinking {
+                p.push_str("<|channel>thought\n<channel|>");
+            }
         }
         p
     }
@@ -872,6 +937,19 @@ impl Model for Gemma4Model {
             close: 101,
             name: "thought",
         })
+    }
+
+    fn tool_call_markers(&self) -> Option<crate::models::ToolCallMarkers> {
+        // <|tool_call> = 48, <tool_call|> = 49 in the gemma4 tokenizer
+        // (the full tool token block is 46..=52).
+        Some(crate::models::ToolCallMarkers {
+            open: 48,
+            close: 49,
+        })
+    }
+
+    fn parse_tool_call(&self, span: &str) -> Result<(String, String)> {
+        toolfmt::parse_call_span(span)
     }
 }
 

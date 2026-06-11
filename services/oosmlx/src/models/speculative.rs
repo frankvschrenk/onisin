@@ -201,8 +201,13 @@ impl Model for SpecPair {
         self.target.forward_logits(tokens, cache)
     }
 
-    fn render_prompt(&self, messages: &[ChatMessage], thinking: bool) -> String {
-        self.target.render_prompt(messages, thinking)
+    fn render_prompt(
+        &self,
+        messages: &[ChatMessage],
+        thinking: bool,
+        tools: &[oos_infer::openai::Tool],
+    ) -> String {
+        self.target.render_prompt(messages, thinking, tools)
     }
 
     fn stop_tokens(&self) -> &[i32] {
@@ -211,6 +216,14 @@ impl Model for SpecPair {
 
     fn reasoning_channel(&self) -> Option<crate::models::ReasoningChannel> {
         self.target.reasoning_channel()
+    }
+
+    fn tool_call_markers(&self) -> Option<crate::models::ToolCallMarkers> {
+        self.target.tool_call_markers()
+    }
+
+    fn parse_tool_call(&self, span: &str) -> Result<(String, String)> {
+        self.target.parse_tool_call(span)
     }
 
     fn generate_greedy(&self, prompt: &[i32], max_tokens: usize) -> Result<Option<Vec<u32>>> {

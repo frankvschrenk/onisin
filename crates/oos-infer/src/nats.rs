@@ -165,6 +165,10 @@ async fn stream_chat(
                                 content: std::mem::take(&mut content),
                                 reasoning_content: (!reasoning.is_empty())
                                     .then(|| std::mem::take(&mut reasoning)),
+                                // Calls arrive whole on the final chunk; the
+                                // assembled reply carries them verbatim.
+                                tool_calls: choice.delta.tool_calls,
+                                tool_call_id: None,
                             },
                             finish_reason: finish,
                         }],

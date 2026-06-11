@@ -12,6 +12,8 @@
 use anyhow::Result;
 use oos_infer::engine::{Engine, GenParams, Generation};
 use oos_infer::openai::ChatMessage;
+#[cfg(feature = "mlx")]
+use oos_infer::openai::{ToolCall, ToolCallFunction};
 use oos_infer::registry;
 
 #[cfg(feature = "mlx")]
@@ -151,6 +153,7 @@ impl Engine for MlxEngine {
             prompt_tokens,
             completion_tokens: 0,
             finish: "stop".to_string(),
+            tool_calls: Vec::new(),
         })
     }
 }
@@ -183,7 +186,7 @@ fn run_generation(
     let model = &resident.model;
     let tokenizer = &resident.tokenizer;
 
-    let prompt = model.render_prompt(messages, params.thinking);
+    let prompt = model.render_prompt(messages, params.thinking, &params.tools);
     let encoding = tokenizer
         .encode(prompt, false)
         .map_err(|e| anyhow!("tokenize: {e}"))?;
@@ -209,11 +212,19 @@ fn run_generation(
     // and the final split.
     let mut content_view: Vec<u32> = Vec::new();
     let mut reasoning_view: Vec<u32> = Vec::new();
-    let accelerated = if params.temperature <= 0.0 && emit.is_none() {
+    // Tool calls force the generic loop: the accelerated path returns its
+    // tokens only as a whole, while call capture needs the per-token stream
+    // (and the stop-after-calls rule below).
+    let accelerated = if params.temperature <= 0.0 && emit.is_none() && params.tools.is_empty() {
         model.generate_greedy(&prompt_ids, params.max_tokens)?
     } else {
         None
     };
+    let toolmark = model.tool_call_markers();
+    // Captured `open..close` token spans, markers excluded; parsed into
+    // structured calls after the loop.
+    let mut tool_spans: Vec<Vec<u32>> = Vec::new();
+    let mut in_tool_call = false;
     let out: Vec<u32> = match accelerated {
         Some(tokens) => tokens,
         None => {
@@ -225,11 +236,34 @@ fn run_generation(
             for _ in 0..params.max_tokens {
                 let logits = model.forward_logits(&step, &mut cache)?;
                 let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
+                // Once the model has issued calls and continues with anything
+                // that is not another call, the turn is the runtime's: stop
+                // and hand the calls back. The dangling token -- a primed
+                // <|tool_response>, a turn end or eos -- is discarded.
+                let opens_call = toolmark.map(|t| next == t.open).unwrap_or(false);
+                if !in_tool_call && !tool_spans.is_empty() && !opens_call {
+                    break;
+                }
                 if stop.contains(&next) {
                     break;
                 }
                 out.push(next as u32);
                 step = vec![next];
+                if let Some(t) = toolmark {
+                    if next == t.open {
+                        in_tool_call = true;
+                        tool_spans.push(Vec::new());
+                        continue;
+                    }
+                    if in_tool_call {
+                        if next == t.close {
+                            in_tool_call = false;
+                        } else if let Some(span) = tool_spans.last_mut() {
+                            span.push(next as u32);
+                        }
+                        continue;
+                    }
+                }
                 match channel {
                     Some(ch) if next == ch.open => in_reasoning = true,
                     Some(ch) if next == ch.close => in_reasoning = false,
@@ -280,6 +314,36 @@ fn run_generation(
         stream_delta(tokenizer, &content_view, emitted_content, None, false, emit)?;
     }
 
+    // Parse the captured call spans into structured calls. A span left open
+    // by an exhausted token budget is dropped (finish then reports "length");
+    // a completed span that fails to parse is a model-side glitch surfaced
+    // as an error, since silently dropping a call would derail an agent loop.
+    let complete_spans = if in_tool_call {
+        &tool_spans[..tool_spans.len() - 1]
+    } else {
+        &tool_spans[..]
+    };
+    let mut tool_calls: Vec<ToolCall> = Vec::with_capacity(complete_spans.len());
+    for (i, span) in complete_spans.iter().enumerate() {
+        // Special tokens kept: the grammar's <|\"|> quote marker must survive
+        // decoding for the parser to see string boundaries.
+        let raw = tokenizer
+            .decode(span, false)
+            .map_err(|e| anyhow!("detokenize tool call: {e}"))?;
+        let (name, arguments) = model.parse_tool_call(&raw)?;
+        tool_calls.push(ToolCall {
+            id: format!("call_{i}"),
+            kind: "function".to_string(),
+            function: ToolCallFunction { name, arguments },
+        });
+    }
+    // Tool blocks travel as structured calls, not as text: strip them from
+    // the raw stream before the content/reasoning split.
+    let text_toks = match toolmark {
+        Some(t) if !tool_spans.is_empty() => strip_tool_spans(&out, t.open as u32, t.close as u32),
+        _ => out.clone(),
+    };
+
     // The answer and the reasoning decode from the split streams; `out`
     // (markers and channel-name line included) stays the accounting basis.
     let decode = |toks: &[u32]| {
@@ -289,7 +353,7 @@ fn run_generation(
     };
     let (text, reasoning) = match channel {
         Some(ch) => {
-            let (content_toks, reasoning_toks) = split_channels(&out, ch);
+            let (content_toks, reasoning_toks) = split_channels(&text_toks, ch);
             let text = decode(&content_toks)?;
             let reasoning = if reasoning_toks.is_empty() {
                 None
@@ -305,14 +369,17 @@ fn run_generation(
             };
             (text, reasoning)
         }
-        None => (decode(&out)?, None),
+        None => (decode(&text_toks)?, None),
     };
 
-    // "length" when the token budget ran out, "stop" when a stop token ended
-    // the sequence early. The uniform rule on the output length covers both
-    // the generic loop and the accelerated greedy path: neither emits the
-    // stop token itself, so a full budget means no stop token was seen.
-    let finish = if out.len() < params.max_tokens {
+    // "tool_calls" when the model requested tools; otherwise "length" when
+    // the token budget ran out and "stop" when a stop token ended the
+    // sequence early. The length rule on the output covers both the generic
+    // loop and the accelerated greedy path: neither emits the stop token
+    // itself, so a full budget means no stop token was seen.
+    let finish = if !tool_calls.is_empty() {
+        "tool_calls"
+    } else if out.len() < params.max_tokens {
         "stop"
     } else {
         "length"
@@ -324,7 +391,29 @@ fn run_generation(
         prompt_tokens,
         completion_tokens: out.len(),
         finish: finish.to_string(),
+        tool_calls,
     })
+}
+
+/// Remove `open..close` tool-call blocks (markers included) from a raw
+/// completion; the calls travel separately as structured ToolCalls, so
+/// nothing of them belongs in the decoded text.
+#[cfg(feature = "mlx")]
+fn strip_tool_spans(out: &[u32], open: u32, close: u32) -> Vec<u32> {
+    let mut kept = Vec::with_capacity(out.len());
+    let mut inside = false;
+    for &tok in out {
+        if tok == open {
+            inside = true;
+        } else if inside {
+            if tok == close {
+                inside = false;
+            }
+        } else {
+            kept.push(tok);
+        }
+    }
+    kept
 }
 
 /// Split a raw completion into (content, reasoning) token streams along the

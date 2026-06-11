@@ -13,6 +13,7 @@
 
 mod gemma3;
 mod gemma4;
+mod toolfmt;
 // Not a `Model` family: the MTP drafter for speculative decoding. It is
 // consumed by the speculative round-loop, not by `load`'s dispatch.
 mod gemma4_assistant;
@@ -39,8 +40,15 @@ pub trait Model: Send {
 
     /// Render this family's chat prompt for the given messages. `thinking`
     /// asks for the family's reasoning mode where one exists (gemma4's
-    /// thought channel); families without one ignore it.
-    fn render_prompt(&self, messages: &[ChatMessage], thinking: bool) -> String;
+    /// thought channel); families without one ignore it. `tools` are
+    /// advertised functions rendered into the family's native declaration
+    /// grammar; families without one ignore them.
+    fn render_prompt(
+        &self,
+        messages: &[ChatMessage],
+        thinking: bool,
+        tools: &[oos_infer::openai::Tool],
+    ) -> String;
 
     /// Token ids that stop generation (eos plus any turn terminator).
     fn stop_tokens(&self) -> &[i32];
@@ -62,6 +70,28 @@ pub trait Model: Send {
     fn reasoning_channel(&self) -> Option<ReasoningChannel> {
         None
     }
+
+    /// The family's tool-call block markers, when it has a native tool
+    /// grammar: the engine captures `open..close` token spans out of the
+    /// answer and hands the decoded spans to [`Model::parse_tool_call`].
+    fn tool_call_markers(&self) -> Option<ToolCallMarkers> {
+        None
+    }
+
+    /// Parse one decoded tool-call span (markers excluded, special tokens
+    /// kept) into `(function name, JSON-encoded arguments object)`. Only
+    /// meaningful for families that report [`Model::tool_call_markers`].
+    fn parse_tool_call(&self, _span: &str) -> Result<(String, String)> {
+        bail!("this model family has no tool-call grammar")
+    }
+}
+
+/// Marker ids of a model family's tool-call block; see
+/// [`Model::tool_call_markers`].
+#[derive(Debug, Clone, Copy)]
+pub struct ToolCallMarkers {
+    pub open: i32,
+    pub close: i32,
 }
 
 /// Marker ids and name of a model family's reasoning channel; see

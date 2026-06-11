@@ -24,6 +24,7 @@ pub async fn chat(engine: Arc<dyn Engine>, req: ChatRequest) -> anyhow::Result<C
         temperature: req.temperature.unwrap_or(0.7),
         top_p: req.top_p.unwrap_or(0.95),
         thinking: req.enable_thinking,
+        tools: req.tools.unwrap_or_default(),
     };
     let model = req.model.clone();
     let messages = req.messages;
@@ -46,6 +47,8 @@ pub async fn chat(engine: Arc<dyn Engine>, req: ChatRequest) -> anyhow::Result<C
                 role: "assistant".to_string(),
                 content: generation.text,
                 reasoning_content: generation.reasoning,
+                tool_calls: (!generation.tool_calls.is_empty()).then_some(generation.tool_calls),
+                tool_call_id: None,
             },
             finish_reason: generation.finish,
         }],
@@ -77,6 +80,7 @@ pub fn chat_stream(
         temperature: req.temperature.unwrap_or(0.7),
         top_p: req.top_p.unwrap_or(0.95),
         thinking: req.enable_thinking,
+        tools: req.tools.unwrap_or_default(),
     };
     let id = format!("chatcmpl-{}", now());
     let created = now();
@@ -126,7 +130,11 @@ pub fn chat_stream(
         match engine.generate_streamed(&model, &messages, &params, &mut emit) {
             Ok(generation) => {
                 let _ = tx.blocking_send(Ok(chunk(
-                    Delta::default(),
+                    Delta {
+                        tool_calls: (!generation.tool_calls.is_empty())
+                            .then_some(generation.tool_calls.clone()),
+                        ..Delta::default()
+                    },
                     Some(generation.finish.clone()),
                     Some(Usage {
                         prompt_tokens: generation.prompt_tokens,

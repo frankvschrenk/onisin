@@ -321,7 +321,12 @@ impl Model for Gemma3Model {
     /// Gemma chat format for the last user turn. The turn markers are added
     /// tokens in Gemma's tokenizer, so we encode them literally. gemma3 has
     /// no thinking channel, so the flag is ignored.
-    fn render_prompt(&self, messages: &[ChatMessage], _thinking: bool) -> String {
+    fn render_prompt(
+        &self,
+        messages: &[ChatMessage],
+        _thinking: bool,
+        _tools: &[oos_infer::openai::Tool],
+    ) -> String {
         let user = messages
             .iter()
             .rev()

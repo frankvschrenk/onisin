@@ -14,6 +14,9 @@ pub struct GenParams {
     /// Let the model reason in its thinking channel before answering, for
     /// model families that have one; the reasoning is returned separately.
     pub thinking: bool,
+    /// Tools advertised for this request; empty means none. Families without
+    /// a native tool grammar ignore them.
+    pub tools: Vec<crate::openai::Tool>,
 }
 
 impl Default for GenParams {
@@ -23,6 +26,7 @@ impl Default for GenParams {
             temperature: 0.7,
             top_p: 0.95,
             thinking: false,
+            tools: Vec::new(),
         }
     }
 }
@@ -36,9 +40,12 @@ pub struct Generation {
     pub reasoning: Option<String>,
     pub prompt_tokens: usize,
     pub completion_tokens: usize,
-    /// Why generation ended, in OpenAI terms: "stop" (a stop token) or
-    /// "length" (the max_tokens budget ran out).
+    /// Why generation ended, in OpenAI terms: "stop" (a stop token),
+    /// "length" (the max_tokens budget ran out), or "tool_calls" (the model
+    /// requested tools and awaits their results).
     pub finish: String,
+    /// Tool calls the model requested this turn; empty on a plain answer.
+    pub tool_calls: Vec<crate::openai::ToolCall>,
 }
 
 /// A loaded model that can generate. Implemented once per accelerator backend

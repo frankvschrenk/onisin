@@ -571,8 +571,11 @@ mod real_target_smoke {
                 role: "user".into(),
                 content: "Was ist die Hauptstadt von Frankreich?".into(),
                 reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
             }],
             false,
+            &[],
         );
         let enc = tokenizer
             .encode(prompt, false)

@@ -30,16 +30,70 @@ pub struct ChatRequest {
     /// stream deltas; `content` stays the clean answer either way.
     #[serde(default)]
     pub enable_thinking: bool,
+    /// Tools advertised to the model (OpenAI function-calling shape). The
+    /// backend renders these into the model family's native declaration
+    /// syntax; families without one ignore them.
+    #[serde(default)]
+    pub tools: Option<Vec<Tool>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
+    /// OpenAI clients send `content: null` on assistant messages that carry
+    /// only tool calls; null folds to empty so the rest of the code can keep
+    /// treating content as plain text.
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub content: String,
     /// The model's reasoning, when thinking was enabled; never part of
     /// `content`. Optional on the wire in both directions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+    /// Tool calls the assistant requested (assistant messages only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    /// On role "tool" messages: the call this result answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
+}
+
+/// One advertised tool. `parameters` stays raw JSON Schema: each backend
+/// renders it into its family's declaration grammar, so no schema model is
+/// imposed here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tool {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub function: ToolFunction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolFunction {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub parameters: Option<serde_json::Value>,
+}
+
+/// A tool call the model requested, in OpenAI shape: `arguments` is a
+/// JSON-encoded object string, not parsed JSON.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub function: ToolCallFunction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallFunction {
+    pub name: String,
+    pub arguments: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,6 +152,11 @@ pub struct Delta {
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+    /// Tool calls, delivered whole on the final chunk rather than as
+    /// incremental fragments: a call is only useful complete, and the
+    /// fragment encoding would buy nothing but client-side reassembly.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
 }
 
 #[derive(Debug, Serialize)]
