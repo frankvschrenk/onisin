@@ -206,9 +206,10 @@ pub fn load(files: &ModelFiles, tokenizer: &Tokenizer) -> Result<Box<dyn Model>>
     // would die deep in config parsing with a misleading error).
     if lower.contains("gemma4") && !lower.contains("assistant") {
         let target = gemma4::Gemma4Model::load(files, tokenizer)?;
-        // Pair an MTP drafter when one fits: greedy requests then run the
-        // speculative round-loop; sampled requests and everything else are
-        // unchanged. Pairing is best-effort and never fails the target load.
+        // Pair an MTP drafter when one is explicitly requested (env opt-in,
+        // see speculative::DRAFT_ENV for why not auto): greedy requests then
+        // run the speculative round-loop; sampled requests and everything
+        // else are unchanged. Pairing never fails the target load.
         Ok(match speculative::find_drafter(&target) {
             Some(drafter) => Box::new(speculative::SpecPair::new(target, drafter)),
             None => Box::new(target),

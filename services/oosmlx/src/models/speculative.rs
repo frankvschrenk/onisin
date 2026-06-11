@@ -27,43 +27,36 @@ use super::{detect_arch, KvCache, Model};
 /// `DRAFT_STEPS + 1` wide. 4-wide blocks are what upstream measured with.
 const DRAFT_STEPS: usize = 3;
 
-/// Env override for drafter pairing: unset = auto-scan the HF cache,
-/// `off` = never pair, anything else = exactly this model (HF repo or path).
+/// Env opt-in for drafter pairing: unset or `off` = no speculation, anything
+/// else = exactly this model (HF repo or path).
+///
+/// Opt-in rather than auto-paired: measured on the 26B with the mxfp4
+/// assistant, acceptance on natural prose is too low to pay for the flat
+/// per-round cost (~0.55 avg accepted of 3 on German, 0.81 on English, vs a
+/// ~1.1 breakeven at ~80ms/round) -- speculation *slowed* real chat down,
+/// while near-perfectly predictable text (counting: 2.94) confirms the
+/// machinery itself is sound. Until rounds get cheaper or acceptance is
+/// gated adaptively, pairing by default would tax every greedy request.
 const DRAFT_ENV: &str = "OOSMLX_DRAFT_MODEL";
 
-/// Find an MTP drafter for `target`. Best-effort by design: any failure logs
-/// and yields `None`, the target then simply runs without speculation.
+/// Find the explicitly requested MTP drafter for `target`. Best-effort by
+/// design: any failure logs and yields `None`, the target then simply runs
+/// without speculation.
 pub(super) fn find_drafter(target: &Gemma4Model) -> Option<Gemma4AssistantModel> {
-    let explicit = match std::env::var(DRAFT_ENV) {
-        Ok(v) if v == "off" => return None,
-        Ok(v) => Some(v),
-        Err(_) => None,
+    let id = match std::env::var(DRAFT_ENV) {
+        Ok(v) if !v.is_empty() && v != "off" => v,
+        _ => return None,
     };
-    let candidates: Vec<String> = match &explicit {
-        Some(id) => vec![id.clone()],
-        // Name pre-filter before touching any files: non-drafter cache entries
-        // (GGUF, embedders) may lack tokenizer.json, and resolving those could
-        // try the network. Real drafter repos all carry "assistant".
-        None => registry::list_hf_cache_models()
-            .into_iter()
-            .filter(|id| id.to_lowercase().contains("assistant"))
-            .collect(),
-    };
-    for id in candidates {
-        match try_drafter(&id, target) {
-            Ok(drafter) => {
-                tracing::info!(drafter = %id, "speculative MTP drafter paired");
-                return Some(drafter);
-            }
-            // An explicit choice failing deserves a visible log; auto-scan
-            // rejections are routine and stay at debug.
-            Err(e) if explicit.is_some() => {
-                tracing::warn!(drafter = %id, error = %e, "requested drafter rejected")
-            }
-            Err(e) => tracing::debug!(drafter = %id, error = %e, "drafter candidate rejected"),
+    match try_drafter(&id, target) {
+        Ok(drafter) => {
+            tracing::info!(drafter = %id, "speculative MTP drafter paired");
+            Some(drafter)
+        }
+        Err(e) => {
+            tracing::warn!(drafter = %id, error = %e, "requested drafter rejected");
+            None
         }
     }
-    None
 }
 
 fn try_drafter(id: &str, target: &Gemma4Model) -> Result<Gemma4AssistantModel> {
