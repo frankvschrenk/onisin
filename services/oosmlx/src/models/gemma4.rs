@@ -783,18 +783,68 @@ impl Model for Gemma4Model {
     }
 
     fn render_prompt(&self, messages: &[ChatMessage]) -> String {
-        let user = messages
-            .iter()
-            .rev()
-            .find(|m| m.role == "user")
-            .map(|m| m.content.as_str())
-            .unwrap_or("");
-        format!("<bos><start_of_turn>user\n{user}<end_of_turn>\n<start_of_turn>model\n")
+        // Gemma 4's own turn format, from the checkpoint's chat_template.jinja
+        // (NOT gemma3's <start_of_turn>): turns are `<|turn>{role}` ...
+        // `<turn|>`, and model turns carry a `thought` channel. The generation
+        // prompt pre-fills an *empty* thought channel -- that is the
+        // template's non-thinking default; a thinking mode would omit it (and
+        // add a `<|think|>` system marker) but then needs the channel parsed
+        // out of the completion, so it waits until we expose it via the API.
+        let mut p = String::from("<bos>");
+        let mut rest = messages;
+        if let Some(first) = messages.first() {
+            if first.role == "system" || first.role == "developer" {
+                p.push_str("<|turn>system\n");
+                p.push_str(first.content.trim());
+                p.push_str("<turn|>\n");
+                rest = &messages[1..];
+            }
+        }
+        let mut prev_role: Option<&str> = None;
+        for m in rest {
+            let role = if m.role == "assistant" {
+                "model"
+            } else {
+                m.role.as_str()
+            };
+            // The template folds consecutive assistant messages into one model
+            // turn: the duplicate opening marker is suppressed, each part
+            // still closes with <turn|>.
+            if !(role == "model" && prev_role == Some("model")) {
+                p.push_str("<|turn>");
+                p.push_str(role);
+                p.push('\n');
+            }
+            if role == "model" {
+                p.push_str(&strip_thinking(&m.content));
+            } else {
+                p.push_str(m.content.trim());
+            }
+            p.push_str("<turn|>\n");
+            prev_role = Some(role);
+        }
+        p.push_str("<|turn>model\n<|channel>thought\n<channel|>");
+        p
     }
 
     fn stop_tokens(&self) -> &[i32] {
         &self.stop
     }
+}
+
+/// Strip `<|channel>...<channel|>` segments from prior assistant content,
+/// mirroring the chat template's strip_thinking macro: when a turn is
+/// re-rendered into the prompt, the model must not see its own past
+/// reasoning. Same split semantics as the Jinja original.
+fn strip_thinking(text: &str) -> String {
+    let mut result = String::new();
+    for part in text.split("<channel|>") {
+        match part.find("<|channel>") {
+            Some(i) => result.push_str(&part[..i]),
+            None => result.push_str(part),
+        }
+    }
+    result.trim().to_string()
 }
 
 /// Format-path smoke for block-scaled quantization (mxfp4), run against a real
