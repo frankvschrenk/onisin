@@ -150,6 +150,7 @@ impl Engine for MlxEngine {
             reasoning: None,
             prompt_tokens,
             completion_tokens: 0,
+            finish: "stop".to_string(),
         })
     }
 }
@@ -307,11 +308,22 @@ fn run_generation(
         None => (decode(&out)?, None),
     };
 
+    // "length" when the token budget ran out, "stop" when a stop token ended
+    // the sequence early. The uniform rule on the output length covers both
+    // the generic loop and the accelerated greedy path: neither emits the
+    // stop token itself, so a full budget means no stop token was seen.
+    let finish = if out.len() < params.max_tokens {
+        "stop"
+    } else {
+        "length"
+    };
+
     Ok(Generation {
         text,
         reasoning,
         prompt_tokens,
         completion_tokens: out.len(),
+        finish: finish.to_string(),
     })
 }
 

@@ -47,7 +47,7 @@ pub async fn chat(engine: Arc<dyn Engine>, req: ChatRequest) -> anyhow::Result<C
                 content: generation.text,
                 reasoning_content: generation.reasoning,
             },
-            finish_reason: "stop".to_string(),
+            finish_reason: generation.finish,
         }],
         usage: Usage {
             prompt_tokens: generation.prompt_tokens,
@@ -127,7 +127,7 @@ pub fn chat_stream(
             Ok(generation) => {
                 let _ = tx.blocking_send(Ok(chunk(
                     Delta::default(),
-                    Some("stop".to_string()),
+                    Some(generation.finish.clone()),
                     Some(Usage {
                         prompt_tokens: generation.prompt_tokens,
                         completion_tokens: generation.completion_tokens,

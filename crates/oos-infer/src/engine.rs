@@ -36,6 +36,9 @@ pub struct Generation {
     pub reasoning: Option<String>,
     pub prompt_tokens: usize,
     pub completion_tokens: usize,
+    /// Why generation ended, in OpenAI terms: "stop" (a stop token) or
+    /// "length" (the max_tokens budget ran out).
+    pub finish: String,
 }
 
 /// A loaded model that can generate. Implemented once per accelerator backend
