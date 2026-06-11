@@ -810,7 +810,12 @@ impl Model for Gemma4Model {
         if thinking || first_is_system {
             p.push_str("<|turn>system\n");
             if thinking {
-                p.push_str("<|think|>\n");
+                // No newline after the marker: the community checkpoint's
+                // Jinja writes `<|think|>\n`, but Google's thinking docs and
+                // the transformers processor write `<|think|><turn|>`, and
+                // mlx_lm thinks correctly on the documented form against this
+                // very checkpoint -- so the docs win over the shipped Jinja.
+                p.push_str("<|think|>");
             }
             if first_is_system {
                 p.push_str(messages[0].content.trim());
