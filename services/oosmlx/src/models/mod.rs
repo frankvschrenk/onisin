@@ -13,6 +13,9 @@
 
 mod gemma3;
 mod gemma4;
+// Not a `Model` family: the MTP drafter for speculative decoding. It is
+// consumed by the engine's speculative round-loop (to come), not by `load`.
+mod gemma4_assistant;
 
 use std::path::Path;
 

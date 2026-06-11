@@ -93,7 +93,7 @@ fn parse_eos(root: &serde_json::Value) -> Vec<u32> {
 /// Whether a layer is local sliding-window or periodic global full attention.
 /// They differ in head_dim, KV-head count, K-eq-V, and RoPE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LayerKind {
+pub(super) enum LayerKind {
     Sliding,
     Full,
 }
@@ -132,7 +132,10 @@ impl Gemma4Config {
 /// carry the per-group params. The format is config-driven, so block-scaled
 /// modes like mxfp4 -- which carry no biases -- load through the same struct.
 /// HF lays weights out as `[out, in]`, so the matmul transposes.
-struct QLinear {
+///
+/// Shared with the gemma4_assistant drafter (same checkpoints, same format
+/// axis), hence the pub(super) visibility on the quant infrastructure here.
+pub(super) struct QLinear {
     weight: Array,
     scales: Array,
     /// `None` for biasless formats (mxfp4/mxfp8); affine carries per-group biases.
@@ -146,7 +149,7 @@ struct QLinear {
 }
 
 impl QLinear {
-    fn forward(&self, x: &Array) -> Result<Array> {
+    pub(super) fn forward(&self, x: &Array) -> Result<Array> {
         Ok(ops::quantized_matmul(
             x,
             &self.weight,
@@ -169,7 +172,7 @@ impl QLinear {
 /// The block is a flat map of scalar globals (`group_size`/`bits`/`mode`) plus
 /// per-module overrides keyed by the exact tensor prefix. Overrides carry only
 /// the fields they change; the rest inherit the global.
-struct QuantConfig {
+pub(super) struct QuantConfig {
     mode: Option<String>,
     group_size: i32,
     bits: i32,
@@ -179,7 +182,7 @@ struct QuantConfig {
 }
 
 impl QuantConfig {
-    fn load(path: &Path) -> Result<Self> {
+    pub(super) fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading {}", path.display()))?;
         let root: serde_json::Value = serde_json::from_str(&text)
@@ -248,12 +251,45 @@ impl QuantConfig {
             .copied()
             .unwrap_or((self.group_size, self.bits))
     }
+
+    /// Build a [`QLinear`] for `prefix` from a loaded tensor map. The format
+    /// details come from the tensors themselves, not the architecture: a
+    /// missing `.biases` marks a biasless format (mxfp4/mxfp8 -- affine ships
+    /// them), and integer (e8m0 block-exponent) scales stay native because
+    /// the quantized ops require them verbatim, while float scales are cast
+    /// to f32 to match the activations. The bit-packed `weight` is never cast.
+    pub(super) fn qlinear(&self, w: &HashMap<String, Array>, prefix: &str) -> Result<QLinear> {
+        let fetch = |name: String| -> Result<Array> {
+            w.get(&name)
+                .cloned()
+                .ok_or_else(|| anyhow!("missing tensor {name}"))
+        };
+        let (group_size, bits) = self.spec_for(prefix);
+        let biases = match w.get(&format!("{prefix}.biases")) {
+            Some(a) => Some(a.as_type::<f32>()?),
+            None => None,
+        };
+        let scales_raw = fetch(format!("{prefix}.scales"))?;
+        let scales = if scales_raw.dtype() == Dtype::Uint8 {
+            scales_raw
+        } else {
+            scales_raw.as_type::<f32>()?
+        };
+        Ok(QLinear {
+            weight: fetch(format!("{prefix}.weight"))?,
+            scales,
+            biases,
+            group_size,
+            bits,
+            mode: self.mode.clone(),
+        })
+    }
 }
 
 /// Load every shard listed in `model.safetensors.index.json` and merge into one
 /// tensor map. The 26B is sharded; a single-file `model.safetensors` is also
 /// accepted as a fallback.
-fn load_weights(dir: &Path) -> Result<HashMap<String, Array>> {
+pub(super) fn load_weights(dir: &Path) -> Result<HashMap<String, Array>> {
     let index = dir.join("model.safetensors.index.json");
     if !index.exists() {
         let single = dir.join("model.safetensors");
@@ -284,7 +320,7 @@ fn load_weights(dir: &Path) -> Result<HashMap<String, Array>> {
 /// Precompute the per-frequency table for the full layers' "proportional"
 /// partial RoPE: the first `rotated_dims` head dims rotate at `theta`, the rest
 /// get an infinite frequency (zero angle => identity / pass-through).
-fn proportional_freqs(head_dim: usize, partial_rotary_factor: f32, theta: f32) -> Array {
+pub(super) fn proportional_freqs(head_dim: usize, partial_rotary_factor: f32, theta: f32) -> Array {
     let rotated = ((head_dim as f32 * partial_rotary_factor) as usize) & !1; // even
     let mut f = Vec::with_capacity(head_dim / 2);
     let mut i = 0;
@@ -358,46 +394,17 @@ impl Gemma4Model {
         let cfg = Gemma4Config::load(&files.config_json).context("loading gemma4 config")?;
         let w = load_weights(&files.dir)?;
 
-        // Plain f32 fetch (norms, scalars). Scales/biases are also pulled as
-        // f32 so the quantized matmuls compute against f32 activations; only
-        // the bit-packed `weight` stays in its native u32 layout.
+        // Plain f32 fetch for norms and scalars (the quantized tensors go
+        // through QuantConfig::qlinear instead).
         let get = |name: &str| -> Result<Array> {
             w.get(name)
                 .ok_or_else(|| anyhow!("missing tensor {name}"))
                 .and_then(|a| Ok(a.as_type::<f32>()?))
         };
-        let raw = |name: &str| -> Result<Array> {
-            w.get(name)
-                .cloned()
-                .ok_or_else(|| anyhow!("missing tensor {name}"))
-        };
         let qcfg = QuantConfig::load(&files.config_json).context("loading gemma4 quant config")?;
-        let qlinear = |prefix: &str| -> Result<QLinear> {
-            let (group_size, bits) = qcfg.spec_for(prefix);
-            // Biasless formats (mxfp4/mxfp8) ship no `.biases` tensor; affine does.
-            let biases = match w.get(&format!("{prefix}.biases")) {
-                Some(a) => Some(a.as_type::<f32>()?),
-                None => None,
-            };
-            // Scales match the f32 activations for affine, but block-scaled
-            // formats (mxfp4/mxfp8) carry uint8 (e8m0) scales that the quantized
-            // ops require verbatim -- casting those to f32 breaks them. Cast only
-            // floating scales; leave integer (block-exponent) scales native.
-            let scales_raw = raw(&format!("{prefix}.scales"))?;
-            let scales = if scales_raw.dtype() == Dtype::Uint8 {
-                scales_raw
-            } else {
-                scales_raw.as_type::<f32>()?
-            };
-            Ok(QLinear {
-                weight: raw(&format!("{prefix}.weight"))?,
-                scales,
-                biases,
-                group_size,
-                bits,
-                mode: qcfg.mode.clone(),
-            })
-        };
+        // The format/bias/scale handling lives in QuantConfig::qlinear, shared
+        // with the gemma4_assistant drafter.
+        let qlinear = |prefix: &str| qcfg.qlinear(&w, prefix);
 
         let lm = "language_model.model";
         let embed = qlinear(&format!("{lm}.embed_tokens"))?;
