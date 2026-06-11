@@ -9,7 +9,10 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::engine::{Engine, GenParams};
-use crate::openai::{ChatMessage, ChatRequest, ChatResponse, Choice, ModelCard, ModelList, Usage};
+use crate::openai::{
+    ChatChunk, ChatMessage, ChatRequest, ChatResponse, Choice, ChunkChoice, Delta, ModelCard,
+    ModelList, Usage,
+};
 
 /// Run one chat completion against the engine.
 ///
@@ -26,11 +29,10 @@ pub async fn chat(engine: Arc<dyn Engine>, req: ChatRequest) -> anyhow::Result<C
 
     // The request's model field is the selector; the engine loads it on demand.
     let selected = model.clone();
-    let generation = tokio::task::spawn_blocking(move || {
-        engine.generate(&selected, &messages, &params)
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("generation task failed: {e}"))??;
+    let generation =
+        tokio::task::spawn_blocking(move || engine.generate(&selected, &messages, &params))
+            .await
+            .map_err(|e| anyhow::anyhow!("generation task failed: {e}"))??;
 
     Ok(ChatResponse {
         id: format!("chatcmpl-{}", now()),
@@ -51,6 +53,88 @@ pub async fn chat(engine: Arc<dyn Engine>, req: ChatRequest) -> anyhow::Result<C
             total_tokens: generation.prompt_tokens + generation.completion_tokens,
         },
     })
+}
+
+/// Run one chat completion as a stream of OpenAI chat.completion.chunk
+/// objects: a role preamble, content deltas as the backend produces them,
+/// and a final chunk carrying finish_reason plus usage.
+///
+/// Chunks are built here, once, so both transports forward them verbatim --
+/// SSE frames on HTTP, messages on NATS -- and behave identically. Errors
+/// travel in-band on the channel because a stream may fail after it has
+/// started, when an HTTP status is no longer available to report it.
+pub fn chat_stream(
+    engine: Arc<dyn Engine>,
+    req: ChatRequest,
+) -> tokio::sync::mpsc::Receiver<Result<ChatChunk, anyhow::Error>> {
+    // Small buffer: the GPU outruns any consumer rarely, and when a slow
+    // consumer fills it, blocking_send simply paces the decode loop.
+    let (tx, rx) = tokio::sync::mpsc::channel(32);
+    let params = GenParams {
+        max_tokens: req.max_tokens.unwrap_or(512),
+        temperature: req.temperature.unwrap_or(0.7),
+        top_p: req.top_p.unwrap_or(0.95),
+    };
+    let id = format!("chatcmpl-{}", now());
+    let created = now();
+    let model = req.model;
+    let messages = req.messages;
+
+    tokio::task::spawn_blocking(move || {
+        let chunk = |delta: Delta, finish: Option<String>, usage: Option<Usage>| ChatChunk {
+            id: id.clone(),
+            object: "chat.completion.chunk",
+            created,
+            model: model.clone(),
+            choices: vec![ChunkChoice {
+                index: 0,
+                delta,
+                finish_reason: finish,
+            }],
+            usage,
+        };
+
+        // Role preamble first, as OpenAI streams it. Send errors mean the
+        // consumer is gone; generation still runs to completion (request
+        // cancellation is a later refinement), so they are ignored.
+        let _ = tx.blocking_send(Ok(chunk(
+            Delta {
+                role: Some("assistant".to_string()),
+                content: None,
+            },
+            None,
+            None,
+        )));
+
+        let mut emit = |piece: &str| {
+            let _ = tx.blocking_send(Ok(chunk(
+                Delta {
+                    role: None,
+                    content: Some(piece.to_string()),
+                },
+                None,
+                None,
+            )));
+        };
+        match engine.generate_streamed(&model, &messages, &params, &mut emit) {
+            Ok(generation) => {
+                let _ = tx.blocking_send(Ok(chunk(
+                    Delta::default(),
+                    Some("stop".to_string()),
+                    Some(Usage {
+                        prompt_tokens: generation.prompt_tokens,
+                        completion_tokens: generation.completion_tokens,
+                        total_tokens: generation.prompt_tokens + generation.completion_tokens,
+                    }),
+                )));
+            }
+            Err(e) => {
+                let _ = tx.blocking_send(Err(e));
+            }
+        }
+    });
+
+    rx
 }
 
 /// The model listing both transports report -- whatever the engine has

@@ -50,4 +50,24 @@ pub trait Engine: Send + Sync {
         messages: &[ChatMessage],
         params: &GenParams,
     ) -> Result<Generation>;
+
+    /// Like [`generate`](Engine::generate), but emitting incremental text as
+    /// it is produced. The default falls back to the blocking generation and
+    /// emits the whole text as one piece, so every backend can be streamed
+    /// from day one and a backend opts into real per-token emission by
+    /// overriding. The returned [`Generation`] still carries the full text
+    /// and token accounting for the final-chunk bookkeeping.
+    fn generate_streamed(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        params: &GenParams,
+        emit: &mut (dyn FnMut(&str) + Send),
+    ) -> Result<Generation> {
+        let generation = self.generate(model, messages, params)?;
+        if !generation.text.is_empty() {
+            emit(&generation.text);
+        }
+        Ok(generation)
+    }
 }

@@ -105,72 +105,35 @@ impl Engine for MlxEngine {
     }
 
     #[cfg(feature = "mlx")]
-    fn generate(&self, model: &str, messages: &[ChatMessage], params: &GenParams) -> Result<Generation> {
-        let mut guard = self
-            .resident
-            .lock()
-            .map_err(|_| anyhow!("resident mutex poisoned"))?;
+    fn generate(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        params: &GenParams,
+    ) -> Result<Generation> {
+        run_generation(self, model, messages, params, None)
+    }
 
-        // Load on demand. On a different id, drop the current model *before*
-        // loading the next so we never hold two large models at once (at the
-        // cost of losing the warm one if the new load fails).
-        let needs_load = guard.as_ref().map(|r| r.id != model).unwrap_or(true);
-        if needs_load {
-            *guard = None;
-            *guard = Some(load_resident(model)?);
-        }
-        let resident = guard.as_ref().expect("resident set above");
-        let model = &resident.model;
-        let tokenizer = &resident.tokenizer;
-
-        let prompt = model.render_prompt(messages);
-        let encoding = tokenizer
-            .encode(prompt, false)
-            .map_err(|e| anyhow!("tokenize: {e}"))?;
-        let prompt_ids: Vec<i32> = encoding.get_ids().iter().map(|&u| u as i32).collect();
-        let prompt_tokens = prompt_ids.len();
-
-        // Greedy requests take a model-specific accelerated path when the
-        // family provides one (speculative decoding); `None` falls back to
-        // the generic per-token loop below.
-        let accelerated = if params.temperature <= 0.0 {
-            model.generate_greedy(&prompt_ids, params.max_tokens)?
-        } else {
-            None
-        };
-        let out: Vec<u32> = match accelerated {
-            Some(tokens) => tokens,
-            None => {
-                let mut cache = crate::models::KvCache::new(model.num_layers());
-                let stop = model.stop_tokens();
-                let mut step = prompt_ids;
-                let mut out: Vec<u32> = Vec::new();
-                for _ in 0..params.max_tokens {
-                    let logits = model.forward_logits(&step, &mut cache)?;
-                    let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
-                    if stop.contains(&next) {
-                        break;
-                    }
-                    out.push(next as u32);
-                    step = vec![next];
-                }
-                out
-            }
-        };
-
-        let text = tokenizer
-            .decode(&out, true)
-            .map_err(|e| anyhow!("detokenize: {e}"))?;
-
-        Ok(Generation {
-            text,
-            prompt_tokens,
-            completion_tokens: out.len(),
-        })
+    #[cfg(feature = "mlx")]
+    fn generate_streamed(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        params: &GenParams,
+        emit: &mut (dyn FnMut(&str) + Send),
+    ) -> Result<Generation> {
+        run_generation(self, model, messages, params, Some(emit))
     }
 
     #[cfg(not(feature = "mlx"))]
-    fn generate(&self, model: &str, messages: &[ChatMessage], _params: &GenParams) -> Result<Generation> {
+    fn generate(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        _params: &GenParams,
+    ) -> Result<Generation> {
+        // The trait's generate_streamed default emits this placeholder as one
+        // chunk, so the non-MLX build streams correctly too.
         let user = messages
             .iter()
             .rev()
@@ -188,4 +151,123 @@ impl Engine for MlxEngine {
             completion_tokens: 0,
         })
     }
+}
+
+/// The one generation path behind both Engine entry points: load or swap the
+/// resident model, render and encode the prompt, decode, and -- when `emit`
+/// is given -- stream incremental text along the way.
+#[cfg(feature = "mlx")]
+fn run_generation(
+    engine: &MlxEngine,
+    model: &str,
+    messages: &[ChatMessage],
+    params: &GenParams,
+    mut emit: Option<&mut (dyn FnMut(&str) + Send)>,
+) -> Result<Generation> {
+    let mut guard = engine
+        .resident
+        .lock()
+        .map_err(|_| anyhow!("resident mutex poisoned"))?;
+
+    // Load on demand. On a different id, drop the current model *before*
+    // loading the next so we never hold two large models at once (at the
+    // cost of losing the warm one if the new load fails).
+    let needs_load = guard.as_ref().map(|r| r.id != model).unwrap_or(true);
+    if needs_load {
+        *guard = None;
+        *guard = Some(load_resident(model)?);
+    }
+    let resident = guard.as_ref().expect("resident set above");
+    let model = &resident.model;
+    let tokenizer = &resident.tokenizer;
+
+    let prompt = model.render_prompt(messages);
+    let encoding = tokenizer
+        .encode(prompt, false)
+        .map_err(|e| anyhow!("tokenize: {e}"))?;
+    let prompt_ids: Vec<i32> = encoding.get_ids().iter().map(|&u| u as i32).collect();
+    let prompt_tokens = prompt_ids.len();
+
+    // Greedy requests take a model-specific accelerated path when the
+    // family provides one (speculative decoding); `None` falls back to
+    // the generic per-token loop below. Streamed requests always take
+    // the generic loop: the accelerated path returns its tokens only as
+    // a whole, and per-block emission is a later refinement of what is
+    // an opt-in feature anyway.
+    let mut emitted = 0usize;
+    let accelerated = if params.temperature <= 0.0 && emit.is_none() {
+        model.generate_greedy(&prompt_ids, params.max_tokens)?
+    } else {
+        None
+    };
+    let out: Vec<u32> = match accelerated {
+        Some(tokens) => tokens,
+        None => {
+            let mut cache = crate::models::KvCache::new(model.num_layers());
+            let stop = model.stop_tokens();
+            let mut step = prompt_ids;
+            let mut out: Vec<u32> = Vec::new();
+            for _ in 0..params.max_tokens {
+                let logits = model.forward_logits(&step, &mut cache)?;
+                let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
+                if stop.contains(&next) {
+                    break;
+                }
+                out.push(next as u32);
+                step = vec![next];
+                if let Some(emit) = emit.as_deref_mut() {
+                    emitted = stream_delta(tokenizer, &out, emitted, emit)?;
+                }
+            }
+            out
+        }
+    };
+
+    let text = tokenizer
+        .decode(&out, true)
+        .map_err(|e| anyhow!("detokenize: {e}"))?;
+
+    // Flush whatever incremental decoding held back (e.g. a trailing
+    // partial UTF-8 sequence) so the stream and the final text agree.
+    if let Some(emit) = emit.as_deref_mut() {
+        if text.len() > emitted && text.is_char_boundary(emitted) {
+            emit(&text[emitted..]);
+        }
+    }
+
+    Ok(Generation {
+        text,
+        prompt_tokens,
+        completion_tokens: out.len(),
+    })
+}
+
+/// Decode the accumulated tokens and emit the not-yet-emitted suffix.
+///
+/// Deltas come from re-decoding the whole sequence because BPE pieces do not
+/// map 1:1 to characters: a multi-byte character can span tokens, and the
+/// tokenizer renders an incomplete tail as U+FFFD. Such a tail (and the rare
+/// non-prefix re-decode) is held back; the next token, or the final flush in
+/// the caller, completes it. Re-decoding is O(n) per token but microseconds
+/// against a ~40ms forward pass, so a stateful detokenizer is not worth its
+/// complexity here.
+#[cfg(feature = "mlx")]
+fn stream_delta(
+    tokenizer: &Tokenizer,
+    out: &[u32],
+    emitted: usize,
+    emit: &mut (dyn FnMut(&str) + Send),
+) -> Result<usize> {
+    let text = tokenizer
+        .decode(out, true)
+        .map_err(|e| anyhow!("detokenize: {e}"))?;
+    if text.len() <= emitted || !text.is_char_boundary(emitted) {
+        return Ok(emitted);
+    }
+    let delta = &text[emitted..];
+    if delta.ends_with('\u{FFFD}') {
+        return Ok(emitted);
+    }
+    emit(delta);
+    Ok(text.len())
 }

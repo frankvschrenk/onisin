@@ -8,13 +8,15 @@ use std::sync::Arc;
 use axum::{
     extract::State,
     http::StatusCode,
+    response::sse::{Event, KeepAlive, Sse},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
+use futures::stream::{self, StreamExt};
 
 use crate::engine::Engine;
-use crate::openai::{ChatRequest, ChatResponse, ModelList};
+use crate::openai::{ChatRequest, ModelList};
 
 type Shared = Arc<dyn Engine>;
 
@@ -41,8 +43,28 @@ async fn list_models(State(engine): State<Shared>) -> Json<ModelList> {
 async fn chat_completions(
     State(engine): State<Shared>,
     Json(req): Json<ChatRequest>,
-) -> Result<Json<ChatResponse>, AppError> {
-    Ok(Json(crate::complete::chat(engine, req).await?))
+) -> Result<Response, AppError> {
+    if !req.stream {
+        return Ok(Json(crate::complete::chat(engine, req).await?).into_response());
+    }
+    // OpenAI's streaming shape: SSE frames each carrying one
+    // chat.completion.chunk, an in-band error object if generation fails
+    // mid-stream, and a literal [DONE] sentinel to finish.
+    let rx = crate::complete::chat_stream(engine, req);
+    let chunks = stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    })
+    .map(|item| match item {
+        Ok(chunk) => Event::default().json_data(chunk),
+        Err(e) => {
+            tracing::error!(error = %e, "stream failed");
+            Event::default().json_data(serde_json::json!({ "error": { "message": e.to_string() } }))
+        }
+    })
+    .chain(stream::iter([Ok(Event::default().data("[DONE]"))]));
+    Ok(Sse::new(chunks)
+        .keep_alive(KeepAlive::default())
+        .into_response())
 }
 
 /// Wraps any error into a JSON 500 so handlers can use `?`.
