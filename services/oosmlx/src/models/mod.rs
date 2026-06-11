@@ -158,7 +158,11 @@ fn detect_arch(config_json: &Path) -> Result<String> {
 pub fn load(files: &ModelFiles, tokenizer: &Tokenizer) -> Result<Box<dyn Model>> {
     let arch = detect_arch(&files.config_json)?;
     let lower = arch.to_lowercase();
-    if lower.contains("gemma4") {
+    // `gemma4_assistant` is a small speculative-decoding draft head, not the MoE
+    // chat model -- same "gemma4" name, different topology. It must fall through
+    // to the unsupported arm rather than mis-load through the MoE path (which
+    // would die deep in config parsing with a misleading error).
+    if lower.contains("gemma4") && !lower.contains("assistant") {
         Ok(Box::new(gemma4::Gemma4Model::load(files, tokenizer)?))
     } else if lower.contains("gemma3") {
         Ok(Box::new(gemma3::Gemma3Model::load(files, tokenizer)?))
