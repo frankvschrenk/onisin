@@ -24,9 +24,13 @@ pub async fn chat(engine: Arc<dyn Engine>, req: ChatRequest) -> anyhow::Result<C
     let model = req.model.clone();
     let messages = req.messages;
 
-    let generation = tokio::task::spawn_blocking(move || engine.generate(&messages, &params))
-        .await
-        .map_err(|e| anyhow::anyhow!("generation task failed: {e}"))??;
+    // The request's model field is the selector; the engine loads it on demand.
+    let selected = model.clone();
+    let generation = tokio::task::spawn_blocking(move || {
+        engine.generate(&selected, &messages, &params)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("generation task failed: {e}"))??;
 
     Ok(ChatResponse {
         id: format!("chatcmpl-{}", now()),
@@ -49,15 +53,20 @@ pub async fn chat(engine: Arc<dyn Engine>, req: ChatRequest) -> anyhow::Result<C
     })
 }
 
-/// The single-model listing both transports report.
+/// The model listing both transports report -- whatever the engine has
+/// available locally (the local Hugging Face cache, by default).
 pub fn models(engine: &Arc<dyn Engine>) -> ModelList {
     ModelList {
         object: "list",
-        data: vec![ModelCard {
-            id: engine.model_id().to_string(),
-            object: "model",
-            owned_by: "onisin",
-        }],
+        data: engine
+            .available_models()
+            .into_iter()
+            .map(|id| ModelCard {
+                id,
+                object: "model",
+                owned_by: "onisin",
+            })
+            .collect(),
     }
 }
 

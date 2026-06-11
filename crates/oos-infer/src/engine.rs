@@ -36,9 +36,18 @@ pub struct Generation {
 /// blocking: the server calls it from a blocking task, so a backend can drive
 /// synchronous GPU compute without fighting the async runtime.
 pub trait Engine: Send + Sync {
-    /// Identifier reported to clients — the requested HF repo id or local path.
-    fn model_id(&self) -> &str;
+    /// Models available to serve, reported by GET /v1/models. Backends source
+    /// this however they like (oosmlx scans the local Hugging Face cache).
+    fn available_models(&self) -> Vec<String>;
 
-    /// Run a full generation for the given chat messages.
-    fn generate(&self, messages: &[ChatMessage], params: &GenParams) -> Result<Generation>;
+    /// Run a full generation with the named model, loading it on demand. The
+    /// model id is the per-request selector (an HF repo id or local path),
+    /// matching how OpenAI/Ollama clients pick a model rather than the server
+    /// being pinned to one at boot.
+    fn generate(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        params: &GenParams,
+    ) -> Result<Generation>;
 }

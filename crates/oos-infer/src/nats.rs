@@ -45,7 +45,7 @@ pub async fn serve(url: String, prefix: String, engine: Arc<dyn Engine>) -> Resu
         %url,
         chat = %chat_subject,
         models = %models_subject,
-        model = engine.model_id(),
+        available = engine.available_models().len(),
         "oos-infer serving NATS Request-Reply"
     );
 

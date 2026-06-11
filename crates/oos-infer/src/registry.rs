@@ -80,6 +80,53 @@ pub fn resolve(model: &ModelRef) -> Result<ModelFiles> {
     }
 }
 
+/// List models present in the local Hugging Face hub cache, reported as repo
+/// ids -- the default source for GET /v1/models. The cache lives at
+/// `$HF_HOME/hub` (falling back to `~/.cache/huggingface/hub`), where each repo
+/// is a `models--org--name` directory; we report those that hold a usable
+/// snapshot (one carrying a `config.json`). An env override and a NATS-store
+/// source are meant to layer on top of this later.
+pub fn list_hf_cache_models() -> Vec<String> {
+    let mut ids = Vec::new();
+    let Ok(entries) = std::fs::read_dir(hf_hub_cache_dir()) else {
+        return ids;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(repo) = name.to_string_lossy().strip_prefix("models--").map(str::to_owned) else {
+            continue;
+        };
+        if !snapshot_has_config(&entry.path()) {
+            continue;
+        }
+        // HF encodes `org/name` as `models--org--name`; reverse the slashes.
+        ids.push(repo.replace("--", "/"));
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// The Hugging Face hub cache directory, honouring `HF_HOME`.
+fn hf_hub_cache_dir() -> PathBuf {
+    if let Ok(hf_home) = std::env::var("HF_HOME") {
+        return PathBuf::from(hf_home).join("hub");
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".cache/huggingface/hub")
+}
+
+/// Whether any snapshot under a repo dir holds a `config.json` -- the cheap
+/// signal that the repo is a usable model rather than a stray download.
+fn snapshot_has_config(repo_dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(repo_dir.join("snapshots")) else {
+        return false;
+    };
+    entries
+        .flatten()
+        .any(|s| s.path().join("config.json").exists())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

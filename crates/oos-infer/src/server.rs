@@ -29,7 +29,7 @@ pub fn router(engine: Shared) -> Router {
 /// Bind and serve until the process is stopped.
 pub async fn serve(addr: SocketAddr, engine: Shared) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(%addr, model = engine.model_id(), "oos-infer serving OpenAI-compatible API");
+    tracing::info!(%addr, available = engine.available_models().len(), "oos-infer serving OpenAI-compatible API");
     axum::serve(listener, router(engine)).await?;
     Ok(())
 }
