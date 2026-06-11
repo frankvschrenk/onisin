@@ -233,9 +233,18 @@ fn run_generation(
             let mut step = prompt_ids;
             let mut out: Vec<u32> = Vec::new();
             let mut in_reasoning = false;
+            // Phase timing: prefill ends when the first token is sampled
+            // (forward_logits is lazy, pick forces it), everything after is
+            // decode. Logged per request so prefill and decode throughput
+            // stay separately comparable against other runtimes.
+            let t0 = std::time::Instant::now();
+            let mut prefill: Option<std::time::Duration> = None;
             for _ in 0..params.max_tokens {
                 let logits = model.forward_logits(&step, &mut cache)?;
                 let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
+                if prefill.is_none() {
+                    prefill = Some(t0.elapsed());
+                }
                 // Once the model has issued calls and continues with anything
                 // that is not another call, the turn is the runtime's: stop
                 // and hand the calls back. The dangling token -- a primed
@@ -294,6 +303,19 @@ fn run_generation(
                     }
                 }
             }
+            let total = t0.elapsed();
+            let prefill = prefill.unwrap_or(total);
+            let decoded = out.len().saturating_sub(1).max(1) as f64;
+            tracing::info!(
+                prompt_tokens,
+                completion_tokens = out.len(),
+                prefill_ms = prefill.as_millis() as u64,
+                prefill_tps =
+                    (prompt_tokens as f64 / prefill.as_secs_f64().max(1e-9)).round() as u64,
+                decode_tps = (decoded / total.saturating_sub(prefill).as_secs_f64().max(1e-9))
+                    .round() as u64,
+                "generation phases"
+            );
             out
         }
     };
