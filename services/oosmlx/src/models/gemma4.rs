@@ -613,18 +613,24 @@ impl Moe {
     /// combine by the (renormalized, per-expert-scaled) routing weights.
     fn forward(
         &self,
-        x: &Array,
+        route_x: &Array,
+        expert_x: &Array,
         num_experts: i32,
         top_k: i32,
         hidden: i32,
         eps: f32,
     ) -> Result<Array> {
-        let seq = x.shape()[0];
+        let seq = expert_x.shape()[0];
 
         // Router: rms_norm(x, scale * hidden^-0.5) -> proj -> top-k -> softmax.
+        // Routed on the *raw* post-attention residual, not the pre-FF-normed
+        // tensor: the router norms its input itself, and pre_ff_ln2's learned
+        // per-dim weight would re-aim the vector and flip top-k expert picks
+        // (the reference routes on `h` while the experts consume the normed
+        // h2 -- mlx_lm gemma4_text.py DecoderLayer).
         let root = Array::from_slice(&[(hidden as f32).powf(-0.5)], &[1]);
         let rw = self.router_scale.multiply(&root)?;
-        let xr = fast::rms_norm(x, &rw, eps)?;
+        let xr = fast::rms_norm(route_x, &rw, eps)?;
         let scores = self.router_proj.forward(&xr)?; // [seq, E]
 
         let part = ops::argpartition_axis(&scores, -top_k, -1)?; // [seq, E]
@@ -637,7 +643,7 @@ impl Moe {
 
         // SwitchGLU over the selected experts (sorted_indices=false: always
         // correct, just unsorted gather access).
-        let xe = ops::expand_dims_axes(x, &[-2, -3])?; // [seq, 1, 1, hidden]
+        let xe = ops::expand_dims_axes(expert_x, &[-2, -3])?; // [seq, 1, 1, hidden]
         let up = gather(&self.up, &xe, &idx)?;
         let gate = gather(&self.gate, &xe, &idx)?;
         let act = nn::gelu_approximate(&gate)?.multiply(&up)?;
@@ -683,6 +689,7 @@ impl Layer {
 
         let h2 = fast::rms_norm(&h, &self.pre_ff_ln2, eps)?;
         let h2 = self.moe.forward(
+            &h,
             &h2,
             cfg.num_experts as i32,
             cfg.top_k_experts as i32,
@@ -1006,6 +1013,77 @@ mod format_smoke {
             "dequantized mxfp4 weight is degenerate"
         );
 
+        Ok(())
+    }
+}
+
+/// Differential-debugging dump against a reference runtime (mlx_lm): one
+/// prefill over a fixed token sequence, every per-layer hidden state saved to
+/// a safetensors file for host-side comparison. A dump instead of asserts
+/// because the interesting question is *where* the forward first diverges,
+/// which one comparison over all checkpoints answers in a single run. Gated
+/// on env (local 26B checkpoint, CI lacks it):
+///   OOSMLX_NUMDIFF_MODEL  - local snapshot dir
+///   OOSMLX_NUMDIFF_TOKENS - JSON file holding a flat array of token ids
+///   OOSMLX_NUMDIFF_OUT    - output .safetensors path
+///   cargo test -p oosmlx --features mlx -- --ignored dump_hidden_states
+#[cfg(test)]
+mod numdiff {
+    use super::*;
+
+    #[test]
+    #[ignore = "needs OOSMLX_NUMDIFF_MODEL/_TOKENS/_OUT"]
+    fn dump_hidden_states() -> Result<()> {
+        let (dir, tokens_path, out) = match (
+            std::env::var("OOSMLX_NUMDIFF_MODEL"),
+            std::env::var("OOSMLX_NUMDIFF_TOKENS"),
+            std::env::var("OOSMLX_NUMDIFF_OUT"),
+        ) {
+            (Ok(m), Ok(t), Ok(o)) => (std::path::PathBuf::from(m), t, o),
+            _ => {
+                eprintln!(
+                    "skipping dump_hidden_states: set OOSMLX_NUMDIFF_MODEL, \
+                     OOSMLX_NUMDIFF_TOKENS and OOSMLX_NUMDIFF_OUT"
+                );
+                return Ok(());
+            }
+        };
+
+        let files = ModelFiles {
+            tokenizer_json: dir.join("tokenizer.json"),
+            config_json: dir.join("config.json"),
+            dir,
+        };
+        let tokenizer = Tokenizer::from_file(&files.tokenizer_json)
+            .map_err(|e| anyhow!("loading tokenizer: {e}"))?;
+        let model = Gemma4Model::load(&files, &tokenizer)?;
+
+        // The reference side tokenizes and writes this file; consuming its
+        // ids verbatim keeps tokenizer differences out of the comparison.
+        let ids: Vec<i32> = serde_json::from_str(&std::fs::read_to_string(&tokens_path)?)?;
+
+        let mut dump: Vec<(String, Array)> = Vec::new();
+        let mut cache = KvCache::new(model.cfg.num_hidden_layers);
+        let mut h = model.embed(&ids)?;
+        dump.push(("embed".to_string(), h.clone()));
+        for (i, (layer, slot)) in model
+            .layers
+            .iter()
+            .zip(cache.slots_mut().iter_mut())
+            .enumerate()
+        {
+            h = layer.forward(&h, &model.cfg, 0, &model.full_freqs, slot)?;
+            dump.push((format!("layer_{i:02}"), h.clone()));
+        }
+        let normed = fast::rms_norm(&h, &model.final_norm, model.cfg.rms_norm_eps)?;
+        dump.push(("final_norm".to_string(), normed));
+        dump.push(("logits".to_string(), model.project_logits(&h)?));
+
+        for (_, a) in &dump {
+            a.eval()?;
+        }
+        Array::save_safetensors(dump.iter().map(|(k, a)| (k.as_str(), a)), None, &out)?;
+        eprintln!("dumped {} checkpoints to {out}", dump.len());
         Ok(())
     }
 }
