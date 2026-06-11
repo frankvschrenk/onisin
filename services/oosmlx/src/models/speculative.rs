@@ -201,12 +201,16 @@ impl Model for SpecPair {
         self.target.forward_logits(tokens, cache)
     }
 
-    fn render_prompt(&self, messages: &[ChatMessage]) -> String {
-        self.target.render_prompt(messages)
+    fn render_prompt(&self, messages: &[ChatMessage], thinking: bool) -> String {
+        self.target.render_prompt(messages, thinking)
     }
 
     fn stop_tokens(&self) -> &[i32] {
         self.target.stop_tokens()
+    }
+
+    fn reasoning_channel(&self) -> Option<crate::models::ReasoningChannel> {
+        self.target.reasoning_channel()
     }
 
     fn generate_greedy(&self, prompt: &[i32], max_tokens: usize) -> Result<Option<Vec<u32>>> {

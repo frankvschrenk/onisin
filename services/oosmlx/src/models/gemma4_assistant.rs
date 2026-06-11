@@ -30,7 +30,9 @@ use mlx_rs::{fast, nn, Array};
 use oos_infer::ModelFiles;
 use serde::Deserialize;
 
-use super::gemma4::{load_weights, proportional_freqs, LayerKind, QLinear, QuantConfig, RopeParameters};
+use super::gemma4::{
+    load_weights, proportional_freqs, LayerKind, QLinear, QuantConfig, RopeParameters,
+};
 
 /// Drafter text-tower parameters from config.json's `text_config`. Same field
 /// names as Gemma 4 but a different subset: dense layers only (no MoE or
@@ -72,10 +74,10 @@ impl Gemma4AssistantConfig {
             use_ordered_embeddings: bool,
             text_config: AssistantTextConfig,
         }
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
-        let root: Root = serde_json::from_str(&text)
-            .with_context(|| format!("parsing {}", path.display()))?;
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let root: Root =
+            serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
         // E2B/E4B drafters route logits through a centroid-based sparse head
         // instead of the tied embedding; that head is not implemented, so
         // fail at load instead of computing wrong logits.
@@ -165,9 +167,15 @@ impl DraftAttn {
     /// absolute query position for the whole draft block.
     fn apply_rope(&self, t: &Array, position: i32, full_freqs: &Array) -> Result<Array> {
         Ok(match self.kind {
-            LayerKind::Full => {
-                fast::rope(t, self.head_dim, false, None, 1.0, position, Some(full_freqs))?
-            }
+            LayerKind::Full => fast::rope(
+                t,
+                self.head_dim,
+                false,
+                None,
+                1.0,
+                position,
+                Some(full_freqs),
+            )?,
             LayerKind::Sliding => fast::rope(
                 t,
                 self.head_dim,
@@ -323,7 +331,11 @@ impl Gemma4AssistantModel {
 
         let full_freqs = {
             let r = &cfg.text.rope_parameters.full_attention;
-            proportional_freqs(cfg.text.global_head_dim, r.partial_rotary_factor, r.rope_theta)
+            proportional_freqs(
+                cfg.text.global_head_dim,
+                r.partial_rotary_factor,
+                r.rope_theta,
+            )
         };
 
         Ok(Self {
@@ -396,7 +408,9 @@ mod fake_target_smoke {
         let mut s = seed ^ 0x9E3779B97F4A7C15;
         let mut v = Vec::with_capacity(n as usize);
         for _ in 0..n {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let u = ((s >> 40) & 0xFFFFFF) as f32 / 16_777_216.0;
             v.push((u - 0.5) * 0.04);
         }
@@ -485,7 +499,8 @@ mod fake_target_smoke {
         // Sliding mask path: push the query position beyond the window so the
         // explicit bidirectional bias (not the None short-circuit) runs.
         let far = tc.sliding_window as i32 + 8;
-        let inputs = ops::concatenate_axis(&[pseudo(&[1, backbone], 7), pseudo(&[1, backbone], 8)], 1)?;
+        let inputs =
+            ops::concatenate_axis(&[pseudo(&[1, backbone], 7), pseudo(&[1, backbone], 8)], 1)?;
         let (_, logits) = model.forward(&inputs, &kv, far)?;
         assert!(
             finite_sum(&logits)?.is_finite(),
@@ -511,9 +526,9 @@ mod fake_target_smoke {
 #[cfg(test)]
 mod real_target_smoke {
     use super::*;
-    use anyhow::anyhow;
     use crate::models::gemma4::Gemma4Model;
     use crate::models::{KvCache, Model};
+    use anyhow::anyhow;
     use mlx_rs::ops;
     use mlx_rs::ops::indexing::IndexOp;
     use oos_infer::openai::ChatMessage;
@@ -536,7 +551,9 @@ mod real_target_smoke {
         ) {
             (Ok(t), Ok(d)) => (std::path::PathBuf::from(t), std::path::PathBuf::from(d)),
             _ => {
-                eprintln!("skipping: OOSMLX_SPEC_TARGET_MODEL / OOSMLX_ASSISTANT_SMOKE_MODEL unset");
+                eprintln!(
+                    "skipping: OOSMLX_SPEC_TARGET_MODEL / OOSMLX_ASSISTANT_SMOKE_MODEL unset"
+                );
                 return Ok(());
             }
         };
@@ -549,10 +566,14 @@ mod real_target_smoke {
 
         // Target prefill through the export hooks (Model::forward_logits
         // discards the hidden states the drafter needs).
-        let prompt = target.render_prompt(&[ChatMessage {
-            role: "user".into(),
-            content: "Was ist die Hauptstadt von Frankreich?".into(),
-        }]);
+        let prompt = target.render_prompt(
+            &[ChatMessage {
+                role: "user".into(),
+                content: "Was ist die Hauptstadt von Frankreich?".into(),
+                reasoning_content: None,
+            }],
+            false,
+        );
         let enc = tokenizer
             .encode(prompt, false)
             .map_err(|e| anyhow!("encode: {e}"))?;

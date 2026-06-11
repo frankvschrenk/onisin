@@ -23,6 +23,7 @@ pub async fn chat(engine: Arc<dyn Engine>, req: ChatRequest) -> anyhow::Result<C
         max_tokens: req.max_tokens.unwrap_or(512),
         temperature: req.temperature.unwrap_or(0.7),
         top_p: req.top_p.unwrap_or(0.95),
+        thinking: req.enable_thinking,
     };
     let model = req.model.clone();
     let messages = req.messages;
@@ -44,6 +45,7 @@ pub async fn chat(engine: Arc<dyn Engine>, req: ChatRequest) -> anyhow::Result<C
             message: ChatMessage {
                 role: "assistant".to_string(),
                 content: generation.text,
+                reasoning_content: generation.reasoning,
             },
             finish_reason: "stop".to_string(),
         }],
@@ -74,6 +76,7 @@ pub fn chat_stream(
         max_tokens: req.max_tokens.unwrap_or(512),
         temperature: req.temperature.unwrap_or(0.7),
         top_p: req.top_p.unwrap_or(0.95),
+        thinking: req.enable_thinking,
     };
     let id = format!("chatcmpl-{}", now());
     let created = now();
@@ -100,21 +103,25 @@ pub fn chat_stream(
         let _ = tx.blocking_send(Ok(chunk(
             Delta {
                 role: Some("assistant".to_string()),
-                content: None,
+                ..Delta::default()
             },
             None,
             None,
         )));
 
-        let mut emit = |piece: &str| {
-            let _ = tx.blocking_send(Ok(chunk(
+        let mut emit = |piece: &str, reasoning: bool| {
+            let delta = if reasoning {
                 Delta {
-                    role: None,
+                    reasoning_content: Some(piece.to_string()),
+                    ..Delta::default()
+                }
+            } else {
+                Delta {
                     content: Some(piece.to_string()),
-                },
-                None,
-                None,
-            )));
+                    ..Delta::default()
+                }
+            };
+            let _ = tx.blocking_send(Ok(chunk(delta, None, None)));
         };
         match engine.generate_streamed(&model, &messages, &params, &mut emit) {
             Ok(generation) => {

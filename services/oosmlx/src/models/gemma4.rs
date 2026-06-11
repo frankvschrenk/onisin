@@ -81,12 +81,14 @@ fn default_partial() -> f32 {
 /// (e.g. <end_of_turn> = 106) lives in the top-level config's eos_token_id list.
 fn parse_eos(root: &serde_json::Value) -> Vec<u32> {
     match root.get("eos_token_id") {
-        Some(serde_json::Value::Array(a)) => {
-            a.iter().filter_map(|v| v.as_u64().map(|u| u as u32)).collect()
-        }
-        Some(serde_json::Value::Number(n)) => {
-            n.as_u64().map(|u| vec![u as u32]).unwrap_or_else(|| vec![1])
-        }
+        Some(serde_json::Value::Array(a)) => a
+            .iter()
+            .filter_map(|v| v.as_u64().map(|u| u as u32))
+            .collect(),
+        Some(serde_json::Value::Number(n)) => n
+            .as_u64()
+            .map(|u| vec![u as u32])
+            .unwrap_or_else(|| vec![1]),
         _ => vec![1],
     }
 }
@@ -102,10 +104,10 @@ pub(super) enum LayerKind {
 impl Gemma4Config {
     /// Parse `text_config` out of the multimodal config.json wrapper.
     fn load(path: &Path) -> Result<Self> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
-        let root: serde_json::Value = serde_json::from_str(&text)
-            .with_context(|| format!("parsing {}", path.display()))?;
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let root: serde_json::Value =
+            serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
         let tc = root
             .get("text_config")
             .cloned()
@@ -184,10 +186,10 @@ pub(super) struct QuantConfig {
 
 impl QuantConfig {
     pub(super) fn load(path: &Path) -> Result<Self> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
-        let root: serde_json::Value = serde_json::from_str(&text)
-            .with_context(|| format!("parsing {}", path.display()))?;
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let root: serde_json::Value =
+            serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
         // mlx-community ships the block under both keys; they are identical.
         let block = root
             .get("quantization")
@@ -302,10 +304,10 @@ pub(super) fn load_weights(dir: &Path) -> Result<HashMap<String, Array>> {
     struct Index {
         weight_map: HashMap<String, String>,
     }
-    let text = std::fs::read_to_string(&index)
-        .with_context(|| format!("reading {}", index.display()))?;
-    let idx: Index = serde_json::from_str(&text)
-        .with_context(|| format!("parsing {}", index.display()))?;
+    let text =
+        std::fs::read_to_string(&index).with_context(|| format!("reading {}", index.display()))?;
+    let idx: Index =
+        serde_json::from_str(&text).with_context(|| format!("parsing {}", index.display()))?;
 
     let shards: HashSet<&String> = idx.weight_map.values().collect();
     let mut weights: HashMap<String, Array> = HashMap::new();
@@ -609,7 +611,14 @@ impl Attn {
 impl Moe {
     /// Routed sparse FFN: route to top-k experts, run SwitchGLU over them, and
     /// combine by the (renormalized, per-expert-scaled) routing weights.
-    fn forward(&self, x: &Array, num_experts: i32, top_k: i32, hidden: i32, eps: f32) -> Result<Array> {
+    fn forward(
+        &self,
+        x: &Array,
+        num_experts: i32,
+        top_k: i32,
+        hidden: i32,
+        eps: f32,
+    ) -> Result<Array> {
         let seq = x.shape()[0];
 
         // Router: rms_norm(x, scale * hidden^-0.5) -> proj -> top-k -> softmax.
@@ -658,7 +667,9 @@ impl Layer {
 
         // Attention with sandwich norm.
         let normed = fast::rms_norm(x, &self.input_ln, eps)?;
-        let attn = self.attn.forward(&normed, eps, window, offset, full_freqs, cache)?;
+        let attn = self
+            .attn
+            .forward(&normed, eps, window, offset, full_freqs, cache)?;
         let attn = fast::rms_norm(&attn, &self.post_attn_ln, eps)?;
         let h = x.add(&attn)?;
 
@@ -782,23 +793,30 @@ impl Model for Gemma4Model {
         Ok(logits.index(tokens.len() as i32 - 1))
     }
 
-    fn render_prompt(&self, messages: &[ChatMessage]) -> String {
+    fn render_prompt(&self, messages: &[ChatMessage], thinking: bool) -> String {
         // Gemma 4's own turn format, from the checkpoint's chat_template.jinja
         // (NOT gemma3's <start_of_turn>): turns are `<|turn>{role}` ...
-        // `<turn|>`, and model turns carry a `thought` channel. The generation
-        // prompt pre-fills an *empty* thought channel -- that is the
-        // template's non-thinking default; a thinking mode would omit it (and
-        // add a `<|think|>` system marker) but then needs the channel parsed
-        // out of the completion, so it waits until we expose it via the API.
+        // `<turn|>`, and model turns carry a `thought` channel. Thinking is
+        // steered exactly as the template does it: enabled, the system turn
+        // opens with a `<|think|>` marker (even without a system message) and
+        // the model opens its own thought channel; disabled, the generation
+        // prompt pre-fills an *empty* thought channel, which suppresses it.
         let mut p = String::from("<bos>");
         let mut rest = messages;
-        if let Some(first) = messages.first() {
-            if first.role == "system" || first.role == "developer" {
-                p.push_str("<|turn>system\n");
-                p.push_str(first.content.trim());
-                p.push_str("<turn|>\n");
+        let first_is_system = messages
+            .first()
+            .map(|m| m.role == "system" || m.role == "developer")
+            .unwrap_or(false);
+        if thinking || first_is_system {
+            p.push_str("<|turn>system\n");
+            if thinking {
+                p.push_str("<|think|>\n");
+            }
+            if first_is_system {
+                p.push_str(messages[0].content.trim());
                 rest = &messages[1..];
             }
+            p.push_str("<turn|>\n");
         }
         let mut prev_role: Option<&str> = None;
         for m in rest {
@@ -823,12 +841,25 @@ impl Model for Gemma4Model {
             p.push_str("<turn|>\n");
             prev_role = Some(role);
         }
-        p.push_str("<|turn>model\n<|channel>thought\n<channel|>");
+        p.push_str("<|turn>model\n");
+        if !thinking {
+            p.push_str("<|channel>thought\n<channel|>");
+        }
         p
     }
 
     fn stop_tokens(&self) -> &[i32] {
         &self.stop
+    }
+
+    fn reasoning_channel(&self) -> Option<crate::models::ReasoningChannel> {
+        // <|channel> = 100, <channel|> = 101 in the gemma4 tokenizer; the
+        // model opens the channel with a literal `thought` name line.
+        Some(crate::models::ReasoningChannel {
+            open: 100,
+            close: 101,
+            name: "thought",
+        })
     }
 }
 

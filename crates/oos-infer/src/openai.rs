@@ -24,12 +24,22 @@ pub struct ChatRequest {
     /// objects match the SSE frames exactly. Ignored over HTTP.
     #[serde(default)]
     pub stream_subject: Option<String>,
+    /// Extension (Qwen/DashScope convention): let the model reason in its
+    /// thinking channel before answering. The reasoning comes back separately
+    /// as `reasoning_content` (DeepSeek convention) on the message and on
+    /// stream deltas; `content` stays the clean answer either way.
+    #[serde(default)]
+    pub enable_thinking: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    /// The model's reasoning, when thinking was enabled; never part of
+    /// `content`. Optional on the wire in both directions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,6 +96,8 @@ pub struct Delta {
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

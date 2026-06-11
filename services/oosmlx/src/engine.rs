@@ -120,7 +120,7 @@ impl Engine for MlxEngine {
         model: &str,
         messages: &[ChatMessage],
         params: &GenParams,
-        emit: &mut (dyn FnMut(&str) + Send),
+        emit: &mut (dyn FnMut(&str, bool) + Send),
     ) -> Result<Generation> {
         run_generation(self, model, messages, params, Some(emit))
     }
@@ -147,6 +147,7 @@ impl Engine for MlxEngine {
         );
         Ok(Generation {
             text,
+            reasoning: None,
             prompt_tokens,
             completion_tokens: 0,
         })
@@ -162,7 +163,7 @@ fn run_generation(
     model: &str,
     messages: &[ChatMessage],
     params: &GenParams,
-    mut emit: Option<&mut (dyn FnMut(&str) + Send)>,
+    mut emit: Option<&mut (dyn FnMut(&str, bool) + Send)>,
 ) -> Result<Generation> {
     let mut guard = engine
         .resident
@@ -181,12 +182,17 @@ fn run_generation(
     let model = &resident.model;
     let tokenizer = &resident.tokenizer;
 
-    let prompt = model.render_prompt(messages);
+    let prompt = model.render_prompt(messages, params.thinking);
     let encoding = tokenizer
         .encode(prompt, false)
         .map_err(|e| anyhow!("tokenize: {e}"))?;
     let prompt_ids: Vec<i32> = encoding.get_ids().iter().map(|&u| u as i32).collect();
     let prompt_tokens = prompt_ids.len();
+
+    let channel = model.reasoning_channel();
+    // The `{name}\n` line the model opens its channel with; stripped from
+    // streamed reasoning the same way the final split strips it.
+    let name_line = channel.map(|ch| format!("{}\n", ch.name));
 
     // Greedy requests take a model-specific accelerated path when the
     // family provides one (speculative decoding); `None` falls back to
@@ -194,7 +200,14 @@ fn run_generation(
     // the generic loop: the accelerated path returns its tokens only as
     // a whole, and per-block emission is a later refinement of what is
     // an opt-in feature anyway.
-    let mut emitted = 0usize;
+    let mut emitted_content = 0usize;
+    let mut emitted_reasoning = 0usize;
+    // Streaming views of the two channels: deltas must decode per channel,
+    // so answer and reasoning tokens are routed apart as they appear, while
+    // `out` keeps the raw sequence (markers included) for token accounting
+    // and the final split.
+    let mut content_view: Vec<u32> = Vec::new();
+    let mut reasoning_view: Vec<u32> = Vec::new();
     let accelerated = if params.temperature <= 0.0 && emit.is_none() {
         model.generate_greedy(&prompt_ids, params.max_tokens)?
     } else {
@@ -207,6 +220,7 @@ fn run_generation(
             let stop = model.stop_tokens();
             let mut step = prompt_ids;
             let mut out: Vec<u32> = Vec::new();
+            let mut in_reasoning = false;
             for _ in 0..params.max_tokens {
                 let logits = model.forward_logits(&step, &mut cache)?;
                 let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
@@ -215,31 +229,111 @@ fn run_generation(
                 }
                 out.push(next as u32);
                 step = vec![next];
-                if let Some(emit) = emit.as_deref_mut() {
-                    emitted = stream_delta(tokenizer, &out, emitted, emit)?;
+                match channel {
+                    Some(ch) if next == ch.open => in_reasoning = true,
+                    Some(ch) if next == ch.close => in_reasoning = false,
+                    _ => {
+                        if let Some(emit) = emit.as_deref_mut() {
+                            if in_reasoning {
+                                reasoning_view.push(next as u32);
+                                emitted_reasoning = stream_delta(
+                                    tokenizer,
+                                    &reasoning_view,
+                                    emitted_reasoning,
+                                    name_line.as_deref(),
+                                    true,
+                                    emit,
+                                )?;
+                            } else {
+                                content_view.push(next as u32);
+                                emitted_content = stream_delta(
+                                    tokenizer,
+                                    &content_view,
+                                    emitted_content,
+                                    None,
+                                    false,
+                                    emit,
+                                )?;
+                            }
+                        }
+                    }
                 }
             }
             out
         }
     };
 
-    let text = tokenizer
-        .decode(&out, true)
-        .map_err(|e| anyhow!("detokenize: {e}"))?;
-
-    // Flush whatever incremental decoding held back (e.g. a trailing
-    // partial UTF-8 sequence) so the stream and the final text agree.
+    // Final flushes: one more delta per channel releases anything held back
+    // mid-stream (a tail that only became a complete character at the end).
     if let Some(emit) = emit.as_deref_mut() {
-        if text.len() > emitted && text.is_char_boundary(emitted) {
-            emit(&text[emitted..]);
+        if !reasoning_view.is_empty() {
+            stream_delta(
+                tokenizer,
+                &reasoning_view,
+                emitted_reasoning,
+                name_line.as_deref(),
+                true,
+                emit,
+            )?;
         }
+        stream_delta(tokenizer, &content_view, emitted_content, None, false, emit)?;
     }
+
+    // The answer and the reasoning decode from the split streams; `out`
+    // (markers and channel-name line included) stays the accounting basis.
+    let decode = |toks: &[u32]| {
+        tokenizer
+            .decode(toks, true)
+            .map_err(|e| anyhow!("detokenize: {e}"))
+    };
+    let (text, reasoning) = match channel {
+        Some(ch) => {
+            let (content_toks, reasoning_toks) = split_channels(&out, ch);
+            let text = decode(&content_toks)?;
+            let reasoning = if reasoning_toks.is_empty() {
+                None
+            } else {
+                let raw = decode(&reasoning_toks)?;
+                let stripped = name_line
+                    .as_deref()
+                    .and_then(|p| raw.strip_prefix(p))
+                    .unwrap_or(&raw)
+                    .trim()
+                    .to_string();
+                (!stripped.is_empty()).then_some(stripped)
+            };
+            (text, reasoning)
+        }
+        None => (decode(&out)?, None),
+    };
 
     Ok(Generation {
         text,
+        reasoning,
         prompt_tokens,
         completion_tokens: out.len(),
     })
+}
+
+/// Split a raw completion into (content, reasoning) token streams along the
+/// channel markers, the markers themselves belonging to neither.
+#[cfg(feature = "mlx")]
+fn split_channels(out: &[u32], ch: crate::models::ReasoningChannel) -> (Vec<u32>, Vec<u32>) {
+    let mut content = Vec::with_capacity(out.len());
+    let mut reasoning = Vec::new();
+    let mut in_reasoning = false;
+    for &tok in out {
+        if tok as i32 == ch.open {
+            in_reasoning = true;
+        } else if tok as i32 == ch.close {
+            in_reasoning = false;
+        } else if in_reasoning {
+            reasoning.push(tok);
+        } else {
+            content.push(tok);
+        }
+    }
+    (content, reasoning)
 }
 
 /// Decode the accumulated tokens and emit the not-yet-emitted suffix.
@@ -255,12 +349,27 @@ fn run_generation(
 fn stream_delta(
     tokenizer: &Tokenizer,
     out: &[u32],
-    emitted: usize,
-    emit: &mut (dyn FnMut(&str) + Send),
+    mut emitted: usize,
+    skip_prefix: Option<&str>,
+    reasoning: bool,
+    emit: &mut (dyn FnMut(&str, bool) + Send),
 ) -> Result<usize> {
     let text = tokenizer
         .decode(out, true)
         .map_err(|e| anyhow!("detokenize: {e}"))?;
+    // A channel opens with its `{name}\n` line; that line is structure, not
+    // reasoning, so it is skipped once complete. Until then (or if the model
+    // deviates from the format) nothing special happens.
+    if emitted == 0 {
+        if let Some(prefix) = skip_prefix {
+            if text.len() < prefix.len() && prefix.starts_with(text.as_str()) {
+                return Ok(0);
+            }
+            if text.starts_with(prefix) {
+                emitted = prefix.len();
+            }
+        }
+    }
     if text.len() <= emitted || !text.is_char_boundary(emitted) {
         return Ok(emitted);
     }
@@ -268,6 +377,6 @@ fn stream_delta(
     if delta.ends_with('\u{FFFD}') {
         return Ok(emitted);
     }
-    emit(delta);
+    emit(delta, reasoning);
     Ok(text.len())
 }

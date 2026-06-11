@@ -37,8 +37,10 @@ pub trait Model: Send {
     /// single most recent token.
     fn forward_logits(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array>;
 
-    /// Render this family's chat prompt for the given messages.
-    fn render_prompt(&self, messages: &[ChatMessage]) -> String;
+    /// Render this family's chat prompt for the given messages. `thinking`
+    /// asks for the family's reasoning mode where one exists (gemma4's
+    /// thought channel); families without one ignore it.
+    fn render_prompt(&self, messages: &[ChatMessage], thinking: bool) -> String;
 
     /// Token ids that stop generation (eos plus any turn terminator).
     fn stop_tokens(&self) -> &[i32];
@@ -52,6 +54,23 @@ pub trait Model: Send {
     fn generate_greedy(&self, _prompt: &[i32], _max_tokens: usize) -> Result<Option<Vec<u32>>> {
         Ok(None)
     }
+
+    /// The family's reasoning channel, when it has one: the engine uses the
+    /// marker ids to route thinking-channel tokens out of the answer (both
+    /// for streaming and for the final reasoning/content split), and the
+    /// channel name to strip the `{name}\n` line the model opens with.
+    fn reasoning_channel(&self) -> Option<ReasoningChannel> {
+        None
+    }
+}
+
+/// Marker ids and name of a model family's reasoning channel; see
+/// [`Model::reasoning_channel`].
+#[derive(Debug, Clone, Copy)]
+pub struct ReasoningChannel {
+    pub open: i32,
+    pub close: i32,
+    pub name: &'static str,
 }
 
 /// Per-layer key/value cache for incremental decoding.

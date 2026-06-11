@@ -11,6 +11,9 @@ pub struct GenParams {
     pub max_tokens: usize,
     pub temperature: f32,
     pub top_p: f32,
+    /// Let the model reason in its thinking channel before answering, for
+    /// model families that have one; the reasoning is returned separately.
+    pub thinking: bool,
 }
 
 impl Default for GenParams {
@@ -19,6 +22,7 @@ impl Default for GenParams {
             max_tokens: 512,
             temperature: 0.7,
             top_p: 0.95,
+            thinking: false,
         }
     }
 }
@@ -27,6 +31,9 @@ impl Default for GenParams {
 #[derive(Debug, Clone)]
 pub struct Generation {
     pub text: String,
+    /// The thinking-channel content, when thinking was enabled and the model
+    /// produced any; never mixed into `text`.
+    pub reasoning: Option<String>,
     pub prompt_tokens: usize,
     pub completion_tokens: usize,
 }
@@ -52,21 +59,26 @@ pub trait Engine: Send + Sync {
     ) -> Result<Generation>;
 
     /// Like [`generate`](Engine::generate), but emitting incremental text as
-    /// it is produced. The default falls back to the blocking generation and
-    /// emits the whole text as one piece, so every backend can be streamed
-    /// from day one and a backend opts into real per-token emission by
-    /// overriding. The returned [`Generation`] still carries the full text
-    /// and token accounting for the final-chunk bookkeeping.
+    /// it is produced -- `emit(piece, reasoning)`, where `reasoning` marks
+    /// thinking-channel pieces as opposed to answer content. The default
+    /// falls back to the blocking generation and emits the whole text in one
+    /// piece (reasoning first, as it happens temporally), so every backend
+    /// can be streamed from day one and a backend opts into real per-token
+    /// emission by overriding. The returned [`Generation`] still carries the
+    /// full text and token accounting for the final-chunk bookkeeping.
     fn generate_streamed(
         &self,
         model: &str,
         messages: &[ChatMessage],
         params: &GenParams,
-        emit: &mut (dyn FnMut(&str) + Send),
+        emit: &mut (dyn FnMut(&str, bool) + Send),
     ) -> Result<Generation> {
         let generation = self.generate(model, messages, params)?;
+        if let Some(reasoning) = generation.reasoning.as_deref() {
+            emit(reasoning, true);
+        }
         if !generation.text.is_empty() {
-            emit(&generation.text);
+            emit(&generation.text, false);
         }
         Ok(generation)
     }

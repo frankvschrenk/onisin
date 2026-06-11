@@ -56,8 +56,8 @@ fn default_eos() -> u32 {
 
 impl Gemma3Config {
     fn load(path: &Path) -> Result<Self> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
     }
 
@@ -319,8 +319,9 @@ impl Model for Gemma3Model {
     }
 
     /// Gemma chat format for the last user turn. The turn markers are added
-    /// tokens in Gemma's tokenizer, so we encode them literally.
-    fn render_prompt(&self, messages: &[ChatMessage]) -> String {
+    /// tokens in Gemma's tokenizer, so we encode them literally. gemma3 has
+    /// no thinking channel, so the flag is ignored.
+    fn render_prompt(&self, messages: &[ChatMessage], _thinking: bool) -> String {
         let user = messages
             .iter()
             .rev()

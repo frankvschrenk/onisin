@@ -125,6 +125,7 @@ async fn stream_chat(
 ) -> Vec<u8> {
     let mut rx = complete::chat_stream(engine, req);
     let mut content = String::new();
+    let mut reasoning = String::new();
     while let Some(item) = rx.recv().await {
         match item {
             Ok(chunk) => {
@@ -148,6 +149,9 @@ async fn stream_chat(
                 if let Some(piece) = choice.delta.content {
                     content.push_str(&piece);
                 }
+                if let Some(piece) = choice.delta.reasoning_content {
+                    reasoning.push_str(&piece);
+                }
                 if let Some(finish) = choice.finish_reason {
                     let resp = ChatResponse {
                         id,
@@ -159,6 +163,8 @@ async fn stream_chat(
                             message: ChatMessage {
                                 role: "assistant".to_string(),
                                 content: std::mem::take(&mut content),
+                                reasoning_content: (!reasoning.is_empty())
+                                    .then(|| std::mem::take(&mut reasoning)),
                             },
                             finish_reason: finish,
                         }],
