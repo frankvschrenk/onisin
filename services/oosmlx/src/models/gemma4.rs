@@ -25,6 +25,7 @@ use serde::Deserialize;
 use std::path::Path;
 use tokenizers::Tokenizer;
 
+use super::gemma4_assistant::SharedKv;
 use super::{KvCache, Model};
 
 /// Gemma 4 text-tower parameters, parsed from config.json's `text_config`.
@@ -689,8 +690,10 @@ impl Layer {
 
 impl Gemma4Model {
     /// Look up token embeddings from the quantized embedding table: gather the
-    /// packed rows for `tokens` and dequantize just those.
-    fn embed(&self, tokens: &[i32]) -> Result<Array> {
+    /// packed rows for `tokens` and dequantize just those. Includes the
+    /// `embed_scale`. pub(super) because the drafter embeds its draft tokens
+    /// through the *target's* table (its input is backbone-width).
+    pub(super) fn embed(&self, tokens: &[i32]) -> Result<Array> {
         use mlx_rs::ops::indexing::IndexOp;
         let ids = Array::from_slice(tokens, &[tokens.len() as i32]);
         let w = self.embed.weight.index(&ids);
@@ -708,22 +711,60 @@ impl Gemma4Model {
         Ok(h.multiply(&scale)?)
     }
 
-    fn forward(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
+    /// Run the layer stack and return the *pre-final-norm* hidden states
+    /// `[seq, hidden]`. Split from logit projection because the speculative
+    /// drafter recurs on exactly this hidden (mlx-vlm taps it before
+    /// `model.norm`); the plain decode path composes both via `forward`.
+    pub(super) fn forward_hidden(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
         let mut h = self.embed(tokens)?;
         let offset = cache.offset() as i32;
         for (layer, slot) in self.layers.iter().zip(cache.slots_mut().iter_mut()) {
             h = layer.forward(&h, &self.cfg, offset, &self.full_freqs, slot)?;
         }
         cache.advance(tokens.len());
+        Ok(h)
+    }
 
-        let h = fast::rms_norm(&h, &self.final_norm, self.cfg.rms_norm_eps)?;
+    /// Final norm + tied quantized LM head + logit softcap over pre-norm
+    /// hidden states from `forward_hidden`.
+    pub(super) fn project_logits(&self, h: &Array) -> Result<Array> {
+        let h = fast::rms_norm(h, &self.final_norm, self.cfg.rms_norm_eps)?;
         // Tied embeddings: logits = h @ embed^T via the quantized embedding.
         let logits = self.embed.forward(&h)?;
         // Final logit softcap: tanh(logits / cap) * cap.
         let cap = self.cfg.final_logit_softcapping;
         let cap_a = Array::from_slice(&[cap], &[1]);
-        let logits = ops::tanh(&logits.divide(&cap_a)?)?.multiply(&cap_a)?;
-        Ok(logits)
+        Ok(ops::tanh(&logits.divide(&cap_a)?)?.multiply(&cap_a)?)
+    }
+
+    fn forward(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
+        let h = self.forward_hidden(tokens, cache)?;
+        self.project_logits(&h)
+    }
+
+    /// Export the drafter's borrowed target state from the KV cache: the
+    /// accumulated post-RoPE K/V of the *last* full-attention and *last*
+    /// sliding-attention layers. Iteration order makes "last wins" implicit;
+    /// the clones are MLX handles sharing the device buffers, not copies.
+    // Consumed by the speculative round-loop (to come); until then only the
+    // real-target smoke uses it, hence the cfg(test)-invisible dead_code.
+    #[allow(dead_code)]
+    pub(super) fn shared_kv(&self, cache: &KvCache) -> Result<SharedKv> {
+        let mut full = None;
+        let mut sliding = None;
+        for (layer, slot) in self.layers.iter().zip(cache.slots()) {
+            if let Some(kv) = slot {
+                match layer.attn.kind {
+                    LayerKind::Full => full = Some(kv.clone()),
+                    LayerKind::Sliding => sliding = Some(kv.clone()),
+                }
+            }
+        }
+        Ok(SharedKv {
+            full: full.ok_or_else(|| anyhow!("shared_kv: no full-attention layer cached"))?,
+            sliding: sliding
+                .ok_or_else(|| anyhow!("shared_kv: no sliding-attention layer cached"))?,
+        })
     }
 }
 

@@ -493,3 +493,115 @@ mod fake_target_smoke {
         Ok(())
     }
 }
+
+/// Real-target integration smoke for the target-side export hooks: prefill
+/// the genuine 26B target, export shared K/V + pre-norm hidden + embeddings
+/// through `Gemma4Model::{forward_hidden, project_logits, shared_kv, embed}`,
+/// and run real draft steps on them. Everything the drafter consumes is
+/// genuine target state -- only the verify/accept round-loop is absent, so
+/// the drafted continuation is printed for eyeballing (--nocapture), not
+/// asserted against a baseline.
+///
+/// Run:
+///   OOSMLX_SPEC_TARGET_MODEL=<26b snapshot dir> \
+///   OOSMLX_ASSISTANT_SMOKE_MODEL=<drafter snapshot dir> \
+///     cargo test -p oosmlx --features mlx -- --ignored --nocapture real_target_drafting
+#[cfg(test)]
+mod real_target_smoke {
+    use super::*;
+    use anyhow::anyhow;
+    use crate::models::gemma4::Gemma4Model;
+    use crate::models::{KvCache, Model};
+    use mlx_rs::ops;
+    use mlx_rs::ops::indexing::IndexOp;
+    use oos_infer::openai::ChatMessage;
+    use tokenizers::Tokenizer;
+
+    fn files_for(dir: std::path::PathBuf) -> ModelFiles {
+        ModelFiles {
+            tokenizer_json: dir.join("tokenizer.json"),
+            config_json: dir.join("config.json"),
+            dir,
+        }
+    }
+
+    #[test]
+    #[ignore = "needs OOSMLX_SPEC_TARGET_MODEL and OOSMLX_ASSISTANT_SMOKE_MODEL model dirs"]
+    fn real_target_drafting() -> Result<()> {
+        let (tdir, ddir) = match (
+            std::env::var("OOSMLX_SPEC_TARGET_MODEL"),
+            std::env::var("OOSMLX_ASSISTANT_SMOKE_MODEL"),
+        ) {
+            (Ok(t), Ok(d)) => (std::path::PathBuf::from(t), std::path::PathBuf::from(d)),
+            _ => {
+                eprintln!("skipping: OOSMLX_SPEC_TARGET_MODEL / OOSMLX_ASSISTANT_SMOKE_MODEL unset");
+                return Ok(());
+            }
+        };
+
+        let tfiles = files_for(tdir);
+        let tokenizer = Tokenizer::from_file(&tfiles.tokenizer_json)
+            .map_err(|e| anyhow!("loading tokenizer: {e}"))?;
+        let target = Gemma4Model::load(&tfiles, &tokenizer)?;
+        let drafter = Gemma4AssistantModel::load(&files_for(ddir))?;
+
+        // Target prefill through the export hooks (Model::forward_logits
+        // discards the hidden states the drafter needs).
+        let prompt = target.render_prompt(&[ChatMessage {
+            role: "user".into(),
+            content: "Was ist die Hauptstadt von Frankreich?".into(),
+        }]);
+        let enc = tokenizer
+            .encode(prompt, false)
+            .map_err(|e| anyhow!("encode: {e}"))?;
+        let ids: Vec<i32> = enc.get_ids().iter().map(|&t| t as i32).collect();
+        let klen = ids.len() as i32;
+
+        let mut cache = KvCache::new(target.num_layers());
+        let hidden = target.forward_hidden(&ids, &mut cache)?;
+        // Pre-norm hidden in backbone width (26B: 2816).
+        assert_eq!(hidden.shape().to_vec(), vec![klen, 2816]);
+
+        // Shared K/V geometry of the 26B: full layers carry 2 KV heads at
+        // head_dim 512, sliding layers 8 at 256; klen positions each.
+        let shared = target.shared_kv(&cache)?;
+        assert_eq!(shared.full.0.shape().to_vec(), vec![1, 2, klen, 512]);
+        assert_eq!(shared.full.1.shape().to_vec(), vec![1, 2, klen, 512]);
+        assert_eq!(shared.sliding.0.shape().to_vec(), vec![1, 8, klen, 256]);
+        assert_eq!(shared.sliding.1.shape().to_vec(), vec![1, 8, klen, 256]);
+
+        // Block seed: the target's greedy bonus token plus the hidden at the
+        // last prompt position.
+        let logits = target.project_logits(&hidden)?;
+        let next = ops::indexing::argmax(&logits.index(klen - 1), false)?;
+        next.eval()?;
+        let bonus = next.item::<u32>();
+        let mut h_prev = hidden.index(klen - 1).reshape(&[1, 2816])?;
+        let mut tok = bonus as i32;
+        let mut drafted = vec![bonus];
+
+        // Draft block: constant absolute position klen, three steps.
+        for step in 0..3u32 {
+            let emb = target.embed(&[tok])?; // [1, 2816], embed_scale applied
+            let inputs = ops::concatenate_axis(&[emb, h_prev.clone()], 1)?;
+            let (hid, logits) = drafter.forward(&inputs, &shared, klen)?;
+            assert_eq!(hid.shape().to_vec(), vec![1, 2816]);
+            let next = ops::indexing::argmax(&logits, false)?;
+            next.eval()?;
+            let id = next.item::<u32>();
+            assert!(
+                (id as usize) < drafter.cfg.text.vocab_size,
+                "step {step}: token out of vocab"
+            );
+            drafted.push(id);
+            tok = id as i32;
+            h_prev = hid;
+        }
+
+        let text = tokenizer
+            .decode(&drafted, false)
+            .map_err(|e| anyhow!("decode: {e}"))?;
+        eprintln!("target bonus + drafted continuation: {text:?}");
+        Ok(())
+    }
+}

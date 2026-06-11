@@ -75,6 +75,13 @@ impl KvCache {
     pub fn slots_mut(&mut self) -> &mut [Option<(Array, Array)>] {
         &mut self.layers
     }
+
+    /// Read-only view of the per-layer slots, for exporting cached K/V to a
+    /// consumer outside the forward pass (the speculative drafter borrows the
+    /// target's accumulated keys/values).
+    pub fn slots(&self) -> &[Option<(Array, Array)>] {
+        &self.layers
+    }
 }
 
 /// Choose the next token id from a logit row: greedy argmax when `temperature`
