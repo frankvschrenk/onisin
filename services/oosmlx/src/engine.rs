@@ -130,19 +130,33 @@ impl Engine for MlxEngine {
         let prompt_ids: Vec<i32> = encoding.get_ids().iter().map(|&u| u as i32).collect();
         let prompt_tokens = prompt_ids.len();
 
-        let mut cache = crate::models::KvCache::new(model.num_layers());
-        let stop = model.stop_tokens();
-        let mut step = prompt_ids;
-        let mut out: Vec<u32> = Vec::new();
-        for _ in 0..params.max_tokens {
-            let logits = model.forward_logits(&step, &mut cache)?;
-            let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
-            if stop.contains(&next) {
-                break;
+        // Greedy requests take a model-specific accelerated path when the
+        // family provides one (speculative decoding); `None` falls back to
+        // the generic per-token loop below.
+        let accelerated = if params.temperature <= 0.0 {
+            model.generate_greedy(&prompt_ids, params.max_tokens)?
+        } else {
+            None
+        };
+        let out: Vec<u32> = match accelerated {
+            Some(tokens) => tokens,
+            None => {
+                let mut cache = crate::models::KvCache::new(model.num_layers());
+                let stop = model.stop_tokens();
+                let mut step = prompt_ids;
+                let mut out: Vec<u32> = Vec::new();
+                for _ in 0..params.max_tokens {
+                    let logits = model.forward_logits(&step, &mut cache)?;
+                    let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
+                    if stop.contains(&next) {
+                        break;
+                    }
+                    out.push(next as u32);
+                    step = vec![next];
+                }
+                out
             }
-            out.push(next as u32);
-            step = vec![next];
-        }
+        };
 
         let text = tokenizer
             .decode(&out, true)

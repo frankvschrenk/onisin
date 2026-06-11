@@ -711,6 +711,12 @@ impl Gemma4Model {
         Ok(h.multiply(&scale)?)
     }
 
+    /// The parsed text-tower config; the speculative pairing validates a
+    /// drafter's backbone width and vocab against it.
+    pub(super) fn config(&self) -> &Gemma4Config {
+        &self.cfg
+    }
+
     /// Run the layer stack and return the *pre-final-norm* hidden states
     /// `[seq, hidden]`. Split from logit projection because the speculative
     /// drafter recurs on exactly this hidden (mlx-vlm taps it before
@@ -746,9 +752,6 @@ impl Gemma4Model {
     /// accumulated post-RoPE K/V of the *last* full-attention and *last*
     /// sliding-attention layers. Iteration order makes "last wins" implicit;
     /// the clones are MLX handles sharing the device buffers, not copies.
-    // Consumed by the speculative round-loop (to come); until then only the
-    // real-target smoke uses it, hence the cfg(test)-invisible dead_code.
-    #[allow(dead_code)]
     pub(super) fn shared_kv(&self, cache: &KvCache) -> Result<SharedKv> {
         let mut full = None;
         let mut sliding = None;

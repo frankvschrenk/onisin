@@ -60,7 +60,9 @@ pub struct Gemma4AssistantConfig {
 }
 
 impl Gemma4AssistantConfig {
-    fn load(path: &Path) -> Result<Self> {
+    /// pub(super): the speculative pairing reads the config alone to validate
+    /// a candidate against the target before loading any weights.
+    pub(super) fn load(path: &Path) -> Result<Self> {
         #[derive(Deserialize)]
         struct Root {
             backbone_hidden_size: usize,

@@ -14,8 +14,9 @@
 mod gemma3;
 mod gemma4;
 // Not a `Model` family: the MTP drafter for speculative decoding. It is
-// consumed by the engine's speculative round-loop (to come), not by `load`.
+// consumed by the speculative round-loop, not by `load`'s dispatch.
 mod gemma4_assistant;
+mod speculative;
 
 use std::path::Path;
 
@@ -41,6 +42,16 @@ pub trait Model: Send {
 
     /// Token ids that stop generation (eos plus any turn terminator).
     fn stop_tokens(&self) -> &[i32];
+
+    /// Model-specific accelerated greedy generation: the whole completion in
+    /// one call, or `None` when the family has no accelerated path and the
+    /// engine should run its generic per-token loop. Implementations mirror
+    /// that loop's contract: greedy, at most `max_tokens` ids, cut *before*
+    /// the first stop token. Today only the speculative target/drafter pair
+    /// overrides this.
+    fn generate_greedy(&self, _prompt: &[i32], _max_tokens: usize) -> Result<Option<Vec<u32>>> {
+        Ok(None)
+    }
 }
 
 /// Per-layer key/value cache for incremental decoding.
@@ -81,6 +92,27 @@ impl KvCache {
     /// target's accumulated keys/values).
     pub fn slots(&self) -> &[Option<(Array, Array)>] {
         &self.layers
+    }
+
+    /// Roll the cache back to the first `len` positions. Speculative decoding
+    /// verifies a whole draft block in one forward and then discards the part
+    /// past the accepted prefix; per-slot slicing is the rollback for our
+    /// concatenating cache. No-op for slots not extending past `len`.
+    pub fn truncate(&mut self, len: usize) -> Result<()> {
+        for slot in &mut self.layers {
+            if let Some((k, v)) = slot.take() {
+                *slot = Some(if k.shape()[2] as usize > len {
+                    (
+                        k.split_axis(&[len as i32], 2)?.swap_remove(0),
+                        v.split_axis(&[len as i32], 2)?.swap_remove(0),
+                    )
+                } else {
+                    (k, v)
+                });
+            }
+        }
+        self.offset = self.offset.min(len);
+        Ok(())
     }
 }
 
@@ -173,7 +205,14 @@ pub fn load(files: &ModelFiles, tokenizer: &Tokenizer) -> Result<Box<dyn Model>>
     // to the unsupported arm rather than mis-load through the MoE path (which
     // would die deep in config parsing with a misleading error).
     if lower.contains("gemma4") && !lower.contains("assistant") {
-        Ok(Box::new(gemma4::Gemma4Model::load(files, tokenizer)?))
+        let target = gemma4::Gemma4Model::load(files, tokenizer)?;
+        // Pair an MTP drafter when one fits: greedy requests then run the
+        // speculative round-loop; sampled requests and everything else are
+        // unchanged. Pairing is best-effort and never fails the target load.
+        Ok(match speculative::find_drafter(&target) {
+            Some(drafter) => Box::new(speculative::SpecPair::new(target, drafter)),
+            None => Box::new(target),
+        })
     } else if lower.contains("gemma3") {
         Ok(Box::new(gemma3::Gemma3Model::load(files, tokenizer)?))
     } else {
