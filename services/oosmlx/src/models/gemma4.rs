@@ -547,8 +547,11 @@ fn rms_no_scale(x: &Array, eps: f32) -> Result<Array> {
     Ok(fast::rms_norm(x, &ones, eps)?)
 }
 
-/// One expert projection over gathered top-k indices (SwitchGLU via gather_qmm).
-fn gather(ql: &QLinear, x: &Array, idx: &Array) -> Result<Array> {
+/// One expert projection over gathered top-k indices (SwitchGLU via
+/// gather_qmm). `sorted` promises the kernel that `idx` is ascending, which
+/// lets it stream each expert's weights once instead of re-fetching them in
+/// routing order -- only valid on the sorted prefill path.
+fn gather(ql: &QLinear, x: &Array, idx: &Array, sorted: bool) -> Result<Array> {
     Ok(ops::gather_qmm(
         x,
         &ql.weight,
@@ -559,7 +562,7 @@ fn gather(ql: &QLinear, x: &Array, idx: &Array) -> Result<Array> {
         true,
         ql.group_size,
         ql.bits,
-        false,
+        sorted,
         ql.mode.as_deref(),
     )?)
 }
@@ -673,14 +676,45 @@ impl Moe {
         let weights = weights.multiply(&per_expert)?; // [seq, k]
         seg_mark(seg, 2, &weights, &mut t0)?;
 
-        // SwitchGLU over the selected experts (sorted_indices=false: always
-        // correct, just unsorted gather access).
-        let xe = ops::expand_dims_axes(expert_x, &[-2, -3])?; // [seq, 1, 1, hidden]
-        let up = gather(&self.up, &xe, &idx)?;
-        let gate = gather(&self.gate, &xe, &idx)?;
-        let act = gelu_tanh(&gate)?.multiply(&up)?;
-        let down = gather(&self.down, &act, &idx)?;
-        let y = down.reshape(&[seq, top_k, hidden])?; // [seq, k, hidden]
+        // SwitchGLU over the selected experts. With many (token, expert)
+        // pairs -- prefill -- sort the pairs by expert id first so gather_qmm
+        // streams each selected expert's weights once, contiguously, instead
+        // of re-fetching them in routing order (mlx_lm's _gather_sort, same
+        // >= 64 threshold: single-token decode, n = top_k = 8, stays on the
+        // plain path and is bit-identical). Logically a permutation, but the
+        // sorted kernel batches rows per expert, so accumulation order -- and
+        // with it bf16 rounding -- can differ from the unsorted path at the
+        // last bit; at temp 0 a borderline token may flip (3877-token A/B:
+        // same summary, one synonymous phrase). Same equivalence class as
+        // mlx_lm's own sorted path. Measured prefill on that A/B: 101 -> 278
+        // tok/s.
+        let n = seq * top_k;
+        let y = if n >= 64 {
+            let flat = idx.reshape(&[n])?; // [n] expert ids in routing order
+            let order = ops::argsort(&flat)?;
+            let inv_order = ops::argsort(&order)?;
+            let sorted_idx = ops::indexing::take(&flat, &order)?; // ascending
+            // order / k maps each sorted pair back to its token row; the x
+            // batch stays 3-D ([n, 1, hidden]) so it broadcasts 1:1 against
+            // the flat index vector.
+            let rows = ops::floor_divide(&order, &Array::from_int(top_k))?;
+            let xs = ops::indexing::take_axis(expert_x, &rows, 0)?
+                .reshape(&[n, 1, hidden])?;
+            let up = gather(&self.up, &xs, &sorted_idx, true)?;
+            let gate = gather(&self.gate, &xs, &sorted_idx, true)?;
+            let act = gelu_tanh(&gate)?.multiply(&up)?;
+            let down = gather(&self.down, &act, &sorted_idx, true)?;
+            let down = down.reshape(&[n, hidden])?;
+            ops::indexing::take_axis(&down, &inv_order, 0)?
+                .reshape(&[seq, top_k, hidden])?
+        } else {
+            let xe = ops::expand_dims_axes(expert_x, &[-2, -3])?; // [seq, 1, 1, hidden]
+            let up = gather(&self.up, &xe, &idx, false)?;
+            let gate = gather(&self.gate, &xe, &idx, false)?;
+            let act = gelu_tanh(&gate)?.multiply(&up)?;
+            let down = gather(&self.down, &act, &idx, false)?;
+            down.reshape(&[seq, top_k, hidden])? // [seq, k, hidden]
+        };
         seg_mark(seg, 3, &y, &mut t0)?;
 
         // Weighted sum over the k experts.
