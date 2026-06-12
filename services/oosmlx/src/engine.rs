@@ -230,13 +230,12 @@ fn run_generation(
         None => {
             let mut cache = crate::models::KvCache::new(model.num_layers());
             let stop = model.stop_tokens();
-            let mut step = prompt_ids;
             let mut out: Vec<u32> = Vec::new();
             let mut in_reasoning = false;
-            // Phase timing: prefill ends when the first token is sampled
-            // (forward_logits is lazy, pick forces it), everything after is
-            // decode. Logged per request so prefill and decode throughput
-            // stay separately comparable against other runtimes.
+            // Phase timing: prefill ends when the first token is synced to
+            // the host, everything after is decode. Logged per request so
+            // prefill and decode throughput stay separately comparable
+            // against other runtimes.
             let t0 = std::time::Instant::now();
             let mut prefill: Option<std::time::Duration> = None;
             // Chunked prefill: a long prompt runs through the layers in
@@ -252,14 +251,39 @@ fn run_generation(
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(2048usize)
                 .max(1);
-            while step.len() > chunk {
-                let rest = step.split_off(chunk);
-                model.forward_logits(&step, &mut cache)?.eval()?;
-                step = rest;
+            let mut start = 0usize;
+            while prompt_ids.len() - start > chunk {
+                let piece =
+                    mlx_rs::Array::from_slice(&prompt_ids[start..start + chunk], &[chunk as i32]);
+                model.forward_logits(&piece, &mut cache)?.eval()?;
+                start += chunk;
             }
-            for _ in 0..params.max_tokens {
-                let logits = model.forward_logits(&step, &mut cache)?;
-                let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
+            let tail = mlx_rs::Array::from_slice(
+                &prompt_ids[start..],
+                &[(prompt_ids.len() - start) as i32],
+            );
+            // Pipelined decode in the mlx_lm shape: the pick stays a lazy
+            // device array, and step n+1's graph is built and kicked with
+            // async_eval *before* step n's token is synced to the host -- the
+            // GPU starts n+1 while the host routes n instead of idling on the
+            // per-token sync. The lookahead past a stop token costs one
+            // speculative forward, amortized over the whole completion; the
+            // cache it touches is request-local.
+            let logits = model.forward_logits(&tail, &mut cache)?;
+            let mut cur = crate::models::pick(&logits, params.temperature, params.top_p)?;
+            if params.max_tokens > 0 {
+                mlx_rs::transforms::async_eval([&cur])?;
+            }
+            for n in 0..params.max_tokens {
+                let ahead = if n + 1 < params.max_tokens {
+                    let logits = model.forward_logits(&cur, &mut cache)?;
+                    let t = crate::models::pick(&logits, params.temperature, params.top_p)?;
+                    mlx_rs::transforms::async_eval([&t])?;
+                    Some(t)
+                } else {
+                    None
+                };
+                let next = cur.item::<i32>();
                 if prefill.is_none() {
                     prefill = Some(t0.elapsed());
                 }
@@ -275,47 +299,53 @@ fn run_generation(
                     break;
                 }
                 out.push(next as u32);
-                step = vec![next];
-                if let Some(t) = toolmark {
-                    if next == t.open {
-                        in_tool_call = true;
-                        tool_spans.push(Vec::new());
-                        continue;
-                    }
-                    if in_tool_call {
-                        if next == t.close {
-                            in_tool_call = false;
-                        } else if let Some(span) = tool_spans.last_mut() {
-                            span.push(next as u32);
-                        }
-                        continue;
-                    }
+                if let Some(t) = ahead {
+                    cur = t;
                 }
-                match channel {
-                    Some(ch) if next == ch.open => in_reasoning = true,
-                    Some(ch) if next == ch.close => in_reasoning = false,
-                    _ => {
-                        if let Some(emit) = emit.as_deref_mut() {
-                            if in_reasoning {
-                                reasoning_view.push(next as u32);
-                                emitted_reasoning = stream_delta(
-                                    tokenizer,
-                                    &reasoning_view,
-                                    emitted_reasoning,
-                                    name_line.as_deref(),
-                                    true,
-                                    emit,
-                                )?;
-                            } else {
-                                content_view.push(next as u32);
-                                emitted_content = stream_delta(
-                                    tokenizer,
-                                    &content_view,
-                                    emitted_content,
-                                    None,
-                                    false,
-                                    emit,
-                                )?;
+                // Token routing; `break 'route` is what `continue` was before
+                // the pipelined rewrite (the loop tail is empty either way).
+                'route: {
+                    if let Some(t) = toolmark {
+                        if next == t.open {
+                            in_tool_call = true;
+                            tool_spans.push(Vec::new());
+                            break 'route;
+                        }
+                        if in_tool_call {
+                            if next == t.close {
+                                in_tool_call = false;
+                            } else if let Some(span) = tool_spans.last_mut() {
+                                span.push(next as u32);
+                            }
+                            break 'route;
+                        }
+                    }
+                    match channel {
+                        Some(ch) if next == ch.open => in_reasoning = true,
+                        Some(ch) if next == ch.close => in_reasoning = false,
+                        _ => {
+                            if let Some(emit) = emit.as_deref_mut() {
+                                if in_reasoning {
+                                    reasoning_view.push(next as u32);
+                                    emitted_reasoning = stream_delta(
+                                        tokenizer,
+                                        &reasoning_view,
+                                        emitted_reasoning,
+                                        name_line.as_deref(),
+                                        true,
+                                        emit,
+                                    )?;
+                                } else {
+                                    content_view.push(next as u32);
+                                    emitted_content = stream_delta(
+                                        tokenizer,
+                                        &content_view,
+                                        emitted_content,
+                                        None,
+                                        false,
+                                        emit,
+                                    )?;
+                                }
                             }
                         }
                     }

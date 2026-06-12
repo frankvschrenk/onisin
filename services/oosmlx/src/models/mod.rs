@@ -36,8 +36,10 @@ pub trait Model: Send {
 
     /// Logits `[vocab]` for the next position, advancing `cache`. On the first
     /// call `tokens` is the whole prompt (prefill); on later calls it is the
-    /// single most recent token.
-    fn forward_logits(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array>;
+    /// single most recent token. Ids arrive as a 1-D i32 array so the decode
+    /// loop can feed the previous step's un-evaluated pick straight back in
+    /// and pipeline steps with async_eval.
+    fn forward_logits(&self, tokens: &Array, cache: &mut KvCache) -> Result<Array>;
 
     /// Render this family's chat prompt for the given messages. `thinking`
     /// asks for the family's reasoning mode where one exists (gemma4's
@@ -490,16 +492,21 @@ fn sliding_mask(
     Ok(m.reshape(&[1, 1, seq, klen])?)
 }
 
-/// Choose the next token id from a logit row: greedy argmax when `temperature`
-/// is non-positive (deterministic), otherwise temperature + top-p sampling.
-pub fn pick(logits: &Array, temperature: f32, top_p: f32) -> Result<i32> {
-    if temperature <= 0.0 {
-        let next = ops::indexing::argmax(logits, false)?;
-        Ok(next.item::<u32>() as i32)
+/// Choose the next token from a logit row as a lazy `[1]` i32 array on the
+/// device: greedy argmax when `temperature` is non-positive (deterministic),
+/// otherwise temperature + top-p sampling. Deliberately *not* synced to the
+/// host here -- the decode loop feeds the pick into the next step's forward
+/// and kicks both with async_eval, reading the token id one step later while
+/// the GPU already works ahead.
+pub fn pick(logits: &Array, temperature: f32, top_p: f32) -> Result<Array> {
+    let tok = if temperature <= 0.0 {
+        ops::indexing::argmax(logits, false)?.reshape(&[1])?
     } else {
-        let next = sample_top_p(logits, temperature, top_p)?;
-        Ok(next.item::<u32>() as i32)
-    }
+        sample_top_p(logits, temperature, top_p)?
+    };
+    // Int32 so families embed the fed-back token with the same index dtype
+    // as the prompt array (argmax and categorical hand back u32).
+    Ok(tok.as_dtype(Dtype::Int32)?)
 }
 
 /// Top-p (nucleus) sampling over one logit row, with temperature, built as

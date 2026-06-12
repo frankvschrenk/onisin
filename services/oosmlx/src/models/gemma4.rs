@@ -814,11 +814,17 @@ impl Gemma4Model {
     /// `embed_scale`. pub(super) because the drafter embeds its draft tokens
     /// through the *target's* table (its input is backbone-width).
     pub(super) fn embed(&self, tokens: &[i32]) -> Result<Array> {
+        self.embed_ids(&Array::from_slice(tokens, &[tokens.len() as i32]))
+    }
+
+    /// Array-id variant of [`Self::embed`]: the decode loop feeds the previous
+    /// step's un-evaluated pick straight back in, so ids arrive as a lazy
+    /// device array rather than host integers.
+    fn embed_ids(&self, ids: &Array) -> Result<Array> {
         use mlx_rs::ops::indexing::IndexOp;
-        let ids = Array::from_slice(tokens, &[tokens.len() as i32]);
-        let w = self.embed.weight.index(&ids);
-        let s = self.embed.scales.index(&ids);
-        let b = self.embed.biases.as_ref().map(|bz| bz.index(&ids));
+        let w = self.embed.weight.index(ids);
+        let s = self.embed.scales.index(ids);
+        let b = self.embed.biases.as_ref().map(|bz| bz.index(ids));
         // Seed the stack in the compute dtype: the quantized matmuls emit
         // their activation dtype, so the embedding decides what every layer
         // computes in. dequantize's output dtype follows the format's scales,
@@ -847,16 +853,23 @@ impl Gemma4Model {
     /// drafter recurs on exactly this hidden (mlx-vlm taps it before
     /// `model.norm`); the plain decode path composes both via `forward`.
     pub(super) fn forward_hidden(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
+        self.forward_hidden_ids(&Array::from_slice(tokens, &[tokens.len() as i32]), cache)
+    }
+
+    /// Array-id variant of [`Self::forward_hidden`], the actual layer-stack
+    /// run; see [`Self::embed_ids`] for why ids arrive as a device array.
+    fn forward_hidden_ids(&self, ids: &Array, cache: &mut KvCache) -> Result<Array> {
+        let seq = ids.dim(0);
         // OOSMLX_STEP_PROFILE=1: force an eval per layer and print per-layer
         // wall times for single-token steps. Costs pipelining (absolute
         // numbers shift), but the *distribution* localizes a regression --
         // built to hunt the bf16 decode collapse.
-        let profile = tokens.len() == 1 && std::env::var_os("OOSMLX_STEP_PROFILE").is_some();
-        let mut h = self.embed(tokens)?;
+        let profile = seq == 1 && std::env::var_os("OOSMLX_STEP_PROFILE").is_some();
+        let mut h = self.embed_ids(ids)?;
         let offset = cache.offset() as i32;
         let masks = step_masks(
             offset,
-            tokens.len() as i32,
+            seq,
             self.cfg.sliding_window as i32,
             !cache.is_linear(),
             COMPUTE,
@@ -874,7 +887,7 @@ impl Gemma4Model {
                 acc[0], acc[1], acc[2], acc[3], acc[4], acc[5]
             );
         }
-        cache.advance(tokens.len());
+        cache.advance(seq as usize);
         Ok(h)
     }
 
@@ -918,14 +931,14 @@ impl Model for Gemma4Model {
         self.cfg.num_hidden_layers
     }
 
-    fn forward_logits(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
+    fn forward_logits(&self, tokens: &Array, cache: &mut KvCache) -> Result<Array> {
         use mlx_rs::ops::indexing::IndexOp;
         // Project only the position we keep: a long prefill's [seq, vocab]
         // logits are one huge quantized matmul plus softcap of which a single
         // row survives, and MLX's laziness cannot prune inside a single node.
         // Norm, head and softcap are row-wise, so slicing first is exact.
-        let h = self.forward_hidden(tokens, cache)?;
-        let last = h.index(tokens.len() as i32 - 1).reshape(&[1, -1])?;
+        let h = self.forward_hidden_ids(tokens, cache)?;
+        let last = h.index(tokens.dim(0) - 1).reshape(&[1, -1])?;
         Ok(self.project_logits(&last)?.index(0))
     }
 

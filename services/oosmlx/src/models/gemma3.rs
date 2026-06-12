@@ -269,12 +269,11 @@ impl Gemma3Model {
     /// Run the layer stack, updating `cache`, returning the *pre-final-norm*
     /// hidden states `[tokens, hidden]`. Final norm and LM head live in
     /// `forward_logits`, which projects only the row it keeps.
-    fn forward_hidden(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
-        let seq = tokens.len() as i32;
-        let ids = Array::from_slice(tokens, &[seq]);
+    fn forward_hidden(&self, ids: &Array, cache: &mut KvCache) -> Result<Array> {
+        let seq = ids.dim(0);
 
         let scale = Array::from_slice(&[self.cfg.embed_scale()], &[1]);
-        let mut h = self.embed.index(&ids).multiply(&scale)?;
+        let mut h = self.embed.index(ids).multiply(&scale)?;
 
         let offset = cache.offset() as i32;
         let masks = step_masks(
@@ -288,7 +287,7 @@ impl Gemma3Model {
         for (layer, slot) in self.layers.iter().zip(cache.slots_mut().iter_mut()) {
             h = layer.forward(&h, &self.cfg, offset, &masks, slot)?;
         }
-        cache.advance(tokens.len());
+        cache.advance(seq as usize);
         Ok(h)
     }
 }
@@ -298,13 +297,13 @@ impl Model for Gemma3Model {
         self.cfg.num_hidden_layers
     }
 
-    fn forward_logits(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
+    fn forward_logits(&self, tokens: &Array, cache: &mut KvCache) -> Result<Array> {
         // Project only the position we keep: a prefill's [seq, vocab] logits
         // are one large matmul of which a single row survives, and MLX's
         // laziness cannot prune inside a single matmul node. Final norm and
         // LM head are row-wise, so slicing first is exact.
         let h = self.forward_hidden(tokens, cache)?;
-        let last = h.index(tokens.len() as i32 - 1).reshape(&[1, -1])?;
+        let last = h.index(tokens.dim(0) - 1).reshape(&[1, -1])?;
         let last = fast::rms_norm(&last, &self.final_norm, self.cfg.rms_norm_eps)?;
         Ok(last.matmul(&self.lm_head.transpose()?)?.index(0))
     }

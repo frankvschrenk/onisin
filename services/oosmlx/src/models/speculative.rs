@@ -199,7 +199,7 @@ impl Model for SpecPair {
         self.target.num_layers()
     }
 
-    fn forward_logits(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
+    fn forward_logits(&self, tokens: &Array, cache: &mut KvCache) -> Result<Array> {
         self.target.forward_logits(tokens, cache)
     }
 
