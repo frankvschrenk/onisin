@@ -18,7 +18,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{anyhow, Context, Result};
-use mlx_rs::{fast, nn, ops, Array, Dtype};
+use mlx_rs::{fast, ops, Array, Dtype};
 use oos_infer::openai::ChatMessage;
 use oos_infer::ModelFiles;
 use serde::Deserialize;
@@ -27,6 +27,14 @@ use tokenizers::Tokenizer;
 
 use super::gemma4_assistant::SharedKv;
 use super::{step_masks, toolfmt, KvCache, KvSlot, MaskKind, Model, StepMasks};
+
+/// The family's compute dtype. bf16 like the mlx_lm reference: activations,
+/// norms and the KV cache at half the f32 memory traffic -- decisive on
+/// Apple Silicon, where the quantized matmuls and attention are bandwidth-
+/// bound. The quantized ops emit the activation dtype, so seeding embeddings
+/// and parameters as bf16 keeps the whole stack in bf16; only the sampled
+/// logit row is widened back to f32 at the engine boundary.
+pub(super) const COMPUTE: Dtype = Dtype::Bfloat16;
 
 /// Gemma 4 text-tower parameters, parsed from config.json's `text_config`.
 ///
@@ -260,7 +268,8 @@ impl QuantConfig {
     /// missing `.biases` marks a biasless format (mxfp4/mxfp8 -- affine ships
     /// them), and integer (e8m0 block-exponent) scales stay native because
     /// the quantized ops require them verbatim, while float scales are cast
-    /// to f32 to match the activations. The bit-packed `weight` is never cast.
+    /// to the compute dtype to match the activations. The bit-packed
+    /// `weight` is never cast.
     pub(super) fn qlinear(&self, w: &HashMap<String, Array>, prefix: &str) -> Result<QLinear> {
         let fetch = |name: String| -> Result<Array> {
             w.get(&name)
@@ -269,14 +278,14 @@ impl QuantConfig {
         };
         let (group_size, bits) = self.spec_for(prefix);
         let biases = match w.get(&format!("{prefix}.biases")) {
-            Some(a) => Some(a.as_type::<f32>()?),
+            Some(a) => Some(a.as_dtype(COMPUTE)?),
             None => None,
         };
         let scales_raw = fetch(format!("{prefix}.scales"))?;
         let scales = if scales_raw.dtype() == Dtype::Uint8 {
             scales_raw
         } else {
-            scales_raw.as_type::<f32>()?
+            scales_raw.as_dtype(COMPUTE)?
         };
         // Mixed checkpoints (e.g. qat-nvfp4: fp4 attention/experts plus
         // affine 8-bit dense MLP) declare per-module overrides without a
@@ -407,12 +416,12 @@ impl Gemma4Model {
         let cfg = Gemma4Config::load(&files.config_json).context("loading gemma4 config")?;
         let w = load_weights(&files.dir)?;
 
-        // Plain f32 fetch for norms and scalars (the quantized tensors go
+        // Norms and scalars in the compute dtype (the quantized tensors go
         // through QuantConfig::qlinear instead).
         let get = |name: &str| -> Result<Array> {
             w.get(name)
                 .ok_or_else(|| anyhow!("missing tensor {name}"))
-                .and_then(|a| Ok(a.as_type::<f32>()?))
+                .and_then(|a| Ok(a.as_dtype(COMPUTE)?))
         };
         let qcfg = QuantConfig::load(&files.config_json).context("loading gemma4 quant config")?;
         // The format/bias/scale handling lives in QuantConfig::qlinear, shared
@@ -508,10 +517,33 @@ impl Gemma4Model {
     }
 }
 
+/// tanh-approximated GELU with dtype-preserving constants:
+/// `0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))`.
+///
+/// Not mlx-rs's `nn::gelu_approximate`: that builds its constants as f32
+/// arrays, and MLX's array-array promotion is strong, so a bf16 activation
+/// is promoted to f32 *inside* the GELU. The f32 result then drags the whole
+/// residual stream into f32 for the rest of the layer -- on every layer,
+/// in both the shared MLP and the expert path -- which cast-stormed bf16
+/// decode down to ~11 tok/s. Constants in `x`'s dtype keep the graph in the
+/// compute dtype end to end. pub(super): the drafter shares it.
+pub(super) fn gelu_tanh(x: &Array) -> Result<Array> {
+    let dt = x.dtype();
+    let c = |v: f32| Array::from_slice(&[v], &[1]).as_dtype(dt);
+    let half = c(0.5)?;
+    let one = c(1.0)?;
+    let beta = c(0.797_884_56)?; // sqrt(2/pi)
+    let alpha = c(0.044_715)?;
+    let x3 = x.multiply(x)?.multiply(x)?;
+    let inner = beta.multiply(&x.add(&alpha.multiply(&x3)?)?)?;
+    let t = ops::tanh(&inner)?;
+    half.multiply(x)?.multiply(&one.add(&t)?).map_err(Into::into)
+}
+
 /// RMSNorm with a unit (no-scale) weight -- Gemma 4's V normalization.
 fn rms_no_scale(x: &Array, eps: f32) -> Result<Array> {
     let dim = *x.shape().last().unwrap();
-    let ones = Array::ones::<f32>(&[dim])?;
+    let ones = ops::ones_dtype(&[dim], x.dtype())?;
     Ok(fast::rms_norm(x, &ones, eps)?)
 }
 
@@ -604,6 +636,7 @@ impl Attn {
 impl Moe {
     /// Routed sparse FFN: route to top-k experts, run SwitchGLU over them, and
     /// combine by the (renormalized, per-expert-scaled) routing weights.
+    #[allow(clippy::too_many_arguments)]
     fn forward(
         &self,
         route_x: &Array,
@@ -612,7 +645,9 @@ impl Moe {
         top_k: i32,
         hidden: i32,
         eps: f32,
+        seg: &mut Option<&mut [f64; 6]>,
     ) -> Result<Array> {
+        let mut t0 = std::time::Instant::now();
         let seq = expert_x.shape()[0];
 
         // Router: rms_norm(x, scale * hidden^-0.5) -> proj -> top-k -> softmax.
@@ -621,7 +656,10 @@ impl Moe {
         // per-dim weight would re-aim the vector and flip top-k expert picks
         // (the reference routes on `h` while the experts consume the normed
         // h2 -- mlx_lm gemma4_text.py DecoderLayer).
-        let root = Array::from_slice(&[(hidden as f32).powf(-0.5)], &[1]);
+        // The scalar must sit in the compute dtype: an f32 literal would
+        // promote the product and pull the router (and everything after the
+        // norm) back into f32 compute.
+        let root = Array::from_slice(&[(hidden as f32).powf(-0.5)], &[1]).as_dtype(COMPUTE)?;
         let rw = self.router_scale.multiply(&root)?;
         let xr = fast::rms_norm(route_x, &rw, eps)?;
         let scores = self.router_proj.forward(&xr)?; // [seq, E]
@@ -633,23 +671,46 @@ impl Moe {
         let weights = ops::softmax_axis(&sel, -1, None)?;
         let per_expert = ops::indexing::take(&self.per_expert_scale, &idx)?; // [seq, k]
         let weights = weights.multiply(&per_expert)?; // [seq, k]
+        seg_mark(seg, 2, &weights, &mut t0)?;
 
         // SwitchGLU over the selected experts (sorted_indices=false: always
         // correct, just unsorted gather access).
         let xe = ops::expand_dims_axes(expert_x, &[-2, -3])?; // [seq, 1, 1, hidden]
         let up = gather(&self.up, &xe, &idx)?;
         let gate = gather(&self.gate, &xe, &idx)?;
-        let act = nn::gelu_approximate(&gate)?.multiply(&up)?;
+        let act = gelu_tanh(&gate)?.multiply(&up)?;
         let down = gather(&self.down, &act, &idx)?;
         let y = down.reshape(&[seq, top_k, hidden])?; // [seq, k, hidden]
+        seg_mark(seg, 3, &y, &mut t0)?;
 
         // Weighted sum over the k experts.
         let w = ops::expand_dims_axes(&weights, &[-1])?; // [seq, k, 1]
-        Ok(w.multiply(&y)?.sum_axes(&[-2], false)?) // [seq, hidden]
+        let out = w.multiply(&y)?.sum_axes(&[-2], false)?; // [seq, hidden]
+        seg_mark(seg, 4, &out, &mut t0)?;
+        Ok(out)
     }
 }
 
+/// Profiler helper for OOSMLX_STEP_PROFILE: with an active segment
+/// accumulator, force an eval at this boundary and book the elapsed time on
+/// segment `idx`. A free function (not a closure) so the accumulator can also
+/// be passed onward between marks.
+fn seg_mark(
+    seg: &mut Option<&mut [f64; 6]>,
+    idx: usize,
+    a: &Array,
+    t0: &mut std::time::Instant,
+) -> Result<()> {
+    if let Some(seg) = seg.as_deref_mut() {
+        a.eval()?;
+        seg[idx] += t0.elapsed().as_secs_f64() * 1e3;
+        *t0 = std::time::Instant::now();
+    }
+    Ok(())
+}
+
 impl Layer {
+    #[allow(clippy::too_many_arguments)]
     fn forward(
         &self,
         x: &Array,
@@ -658,7 +719,13 @@ impl Layer {
         full_freqs: &Array,
         masks: &StepMasks,
         slot: &mut KvSlot,
+        // Segment-time accumulator [attn, shared-mlp, moe-router, moe-gathers,
+        // moe-combine, rest]; `Some` only under OOSMLX_STEP_PROFILE, forcing
+        // an eval per segment.
+        seg: &mut Option<&mut [f64; 6]>,
     ) -> Result<Array> {
+        let mut t0 = std::time::Instant::now();
+
         let eps = cfg.rms_norm_eps;
         let (mask, window) = match self.attn.kind {
             LayerKind::Sliding => (&masks.sliding, Some(cfg.sliding_window as i32)),
@@ -672,31 +739,38 @@ impl Layer {
             .forward(&normed, eps, mask, offset, full_freqs, window, slot)?;
         let attn = fast::rms_norm(&attn, &self.post_attn_ln, eps)?;
         let h = x.add(&attn)?;
+        seg_mark(seg, 0, &h, &mut t0)?;
 
         // Shared dense MLP (h1) plus routed experts (h2), each with its own
         // pre/post feedforward norms; summed, then a final feedforward norm.
         let h1 = fast::rms_norm(&h, &self.pre_ff_ln, eps)?;
-        let gate = nn::gelu_approximate(&self.mlp_gate.forward(&h1)?)?;
+        let gate = gelu_tanh(&self.mlp_gate.forward(&h1)?)?;
         let up = self.mlp_up.forward(&h1)?;
         let h1 = self.mlp_down.forward(&gate.multiply(&up)?)?;
         let h1 = fast::rms_norm(&h1, &self.post_ff_ln1, eps)?;
+        seg_mark(seg, 1, &h1, &mut t0)?;
 
         let h2 = fast::rms_norm(&h, &self.pre_ff_ln2, eps)?;
-        let h2 = self.moe.forward(
-            &h,
-            &h2,
-            cfg.num_experts as i32,
-            cfg.top_k_experts as i32,
-            cfg.hidden_size as i32,
-            eps,
-        )?;
+        let h2 = self
+            .moe
+            .forward(
+                &h,
+                &h2,
+                cfg.num_experts as i32,
+                cfg.top_k_experts as i32,
+                cfg.hidden_size as i32,
+                eps,
+                seg,
+            )?;
         let h2 = fast::rms_norm(&h2, &self.post_ff_ln2, eps)?;
 
         let ff = h1.add(&h2)?;
         let ff = fast::rms_norm(&ff, &self.post_ff_ln, eps)?;
         let h = h.add(&ff)?;
 
-        Ok(h.multiply(&self.layer_scalar)?)
+        let out = h.multiply(&self.layer_scalar)?;
+        seg_mark(seg, 5, &out, &mut t0)?;
+        Ok(out)
     }
 }
 
@@ -711,6 +785,10 @@ impl Gemma4Model {
         let w = self.embed.weight.index(&ids);
         let s = self.embed.scales.index(&ids);
         let b = self.embed.biases.as_ref().map(|bz| bz.index(&ids));
+        // Seed the stack in the compute dtype: the quantized matmuls emit
+        // their activation dtype, so the embedding decides what every layer
+        // computes in. dequantize's output dtype follows the format's scales,
+        // hence the explicit cast.
         let h = ops::dequantize(
             &w,
             &s,
@@ -718,8 +796,9 @@ impl Gemma4Model {
             self.embed.group_size,
             self.embed.bits,
             self.embed.mode.as_deref(),
-        )?;
-        let scale = Array::from_slice(&[self.cfg.embed_scale()], &[1]);
+        )?
+        .as_dtype(COMPUTE)?;
+        let scale = Array::from_slice(&[self.cfg.embed_scale()], &[1]).as_dtype(COMPUTE)?;
         Ok(h.multiply(&scale)?)
     }
 
@@ -734,6 +813,11 @@ impl Gemma4Model {
     /// drafter recurs on exactly this hidden (mlx-vlm taps it before
     /// `model.norm`); the plain decode path composes both via `forward`.
     pub(super) fn forward_hidden(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
+        // OOSMLX_STEP_PROFILE=1: force an eval per layer and print per-layer
+        // wall times for single-token steps. Costs pipelining (absolute
+        // numbers shift), but the *distribution* localizes a regression --
+        // built to hunt the bf16 decode collapse.
+        let profile = tokens.len() == 1 && std::env::var_os("OOSMLX_STEP_PROFILE").is_some();
         let mut h = self.embed(tokens)?;
         let offset = cache.offset() as i32;
         let masks = step_masks(
@@ -741,9 +825,20 @@ impl Gemma4Model {
             tokens.len() as i32,
             self.cfg.sliding_window as i32,
             !cache.is_linear(),
+            COMPUTE,
         )?;
+        let mut acc = [0f64; 6];
         for (layer, slot) in self.layers.iter().zip(cache.slots_mut().iter_mut()) {
-            h = layer.forward(&h, &self.cfg, offset, &self.full_freqs, &masks, slot)?;
+            let mut seg = profile.then_some(&mut acc);
+            h = layer.forward(&h, &self.cfg, offset, &self.full_freqs, &masks, slot, &mut seg)?;
+        }
+        if profile {
+            let total: f64 = acc.iter().sum();
+            eprintln!(
+                "step_profile total={total:.1}ms attn={:.1} mlp={:.1} \
+                 router={:.1} gathers={:.1} combine={:.1} rest={:.1}",
+                acc[0], acc[1], acc[2], acc[3], acc[4], acc[5]
+            );
         }
         cache.advance(tokens.len());
         Ok(h)
@@ -757,7 +852,7 @@ impl Gemma4Model {
         let logits = self.embed.forward(&h)?;
         // Final logit softcap: tanh(logits / cap) * cap.
         let cap = self.cfg.final_logit_softcapping;
-        let cap_a = Array::from_slice(&[cap], &[1]);
+        let cap_a = Array::from_slice(&[cap], &[1]).as_dtype(COMPUTE)?;
         Ok(ops::tanh(&logits.divide(&cap_a)?)?.multiply(&cap_a)?)
     }
 
@@ -991,6 +1086,8 @@ mod format_smoke {
         while !r.shape().is_empty() {
             r = r.sum_axes(&[0], false)?;
         }
+        // Widen before the host read; quantized ops may emit bf16.
+        let r = r.as_dtype(Dtype::Float32)?;
         r.eval()?;
         Ok(r.item::<f32>())
     }
@@ -1097,7 +1194,9 @@ mod format_smoke {
 
 /// Differential-debugging dump against a reference runtime (mlx_lm): one
 /// prefill over a fixed token sequence, every per-layer hidden state saved to
-/// a safetensors file for host-side comparison. A dump instead of asserts
+/// a safetensors file for host-side comparison. Since the bf16 switch the
+/// dump is in the compute dtype: run the reference in bf16 too (drop its
+/// `set_dtype(float32)`) or expect bf16-rounding-sized deltas, not 1e-4s. A dump instead of asserts
 /// because the interesting question is *where* the forward first diverges,
 /// which one comparison over all checkpoints answers in a single run. Gated
 /// on env (local 26B checkpoint, CI lacks it):
@@ -1149,6 +1248,7 @@ mod numdiff {
             ids.len() as i32,
             model.cfg.sliding_window as i32,
             !cache.is_linear(),
+            COMPUTE,
         )?;
         for (i, (layer, slot)) in model
             .layers
@@ -1156,7 +1256,7 @@ mod numdiff {
             .zip(cache.slots_mut().iter_mut())
             .enumerate()
         {
-            h = layer.forward(&h, &model.cfg, 0, &model.full_freqs, &masks, slot)?;
+            h = layer.forward(&h, &model.cfg, 0, &model.full_freqs, &masks, slot, &mut None)?;
             dump.push((format!("layer_{i:02}"), h.clone()));
         }
         let normed = fast::rms_norm(&h, &model.final_norm, model.cfg.rms_norm_eps)?;

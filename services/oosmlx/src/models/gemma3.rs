@@ -281,6 +281,8 @@ impl Gemma3Model {
             seq,
             self.cfg.sliding_window as i32,
             !cache.is_linear(),
+            // gemma3 still computes in f32 (correctness-first; see module doc).
+            mlx_rs::Dtype::Float32,
         )?;
         for (layer, slot) in self.layers.iter().zip(cache.slots_mut().iter_mut()) {
             h = layer.forward(&h, &self.cfg, offset, &masks, slot)?;

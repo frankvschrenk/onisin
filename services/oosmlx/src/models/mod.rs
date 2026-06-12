@@ -23,7 +23,7 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use mlx_rs::ops::indexing::{TryIndexMutOp, TryIndexOp};
-use mlx_rs::{ops, Array};
+use mlx_rs::{ops, Array, Dtype};
 use oos_infer::openai::ChatMessage;
 use oos_infer::ModelFiles;
 use tokenizers::Tokenizer;
@@ -430,8 +430,16 @@ pub(crate) enum MaskKind {
 /// wide. `retained` says sliding slots rotate (keep only the trailing
 /// `window`): their keys then start at `offset - min(offset, window)` instead
 /// of 0, and a single-token step needs no sliding mask at all -- retention
-/// already evicted everything out of window.
-pub(crate) fn step_masks(offset: i32, seq: i32, window: i32, retained: bool) -> Result<StepMasks> {
+/// already evicted everything out of window. `dtype` is the family's compute
+/// dtype: an additive mask must match the attention scores, or SDPA promotes
+/// the whole score tensor and silently drops back to wider compute.
+pub(crate) fn step_masks(
+    offset: i32,
+    seq: i32,
+    window: i32,
+    retained: bool,
+    dtype: Dtype,
+) -> Result<StepMasks> {
     let full = if seq <= 1 {
         MaskKind::None
     } else {
@@ -451,7 +459,7 @@ pub(crate) fn step_masks(offset: i32, seq: i32, window: i32, retained: bool) -> 
             MaskKind::Causal
         }
     } else {
-        MaskKind::Mask(sliding_mask(offset, seq, key_start, old + seq, window)?)
+        MaskKind::Mask(sliding_mask(offset, seq, key_start, old + seq, window, dtype)?)
     };
     Ok(StepMasks { full, sliding })
 }
@@ -463,7 +471,14 @@ pub(crate) fn step_masks(offset: i32, seq: i32, window: i32, retained: bool) -> 
 /// allowed when causal (`kpos <= qpos`) and within the window
 /// (`qpos - kpos < window`). Disallowed positions get a large finite
 /// negative -- effectively -inf for the softmax, but finite to avoid NaN.
-fn sliding_mask(offset: i32, seq: i32, key_start: i32, klen: i32, window: i32) -> Result<Array> {
+fn sliding_mask(
+    offset: i32,
+    seq: i32,
+    key_start: i32,
+    klen: i32,
+    window: i32,
+    dtype: Dtype,
+) -> Result<Array> {
     let q = Array::arange::<_, i32>(offset, offset + seq, None)?.reshape(&[seq, 1])?;
     let k = Array::arange::<_, i32>(key_start, key_start + klen, None)?.reshape(&[1, klen])?;
     let causal = k.le(&q)?;
@@ -471,7 +486,7 @@ fn sliding_mask(offset: i32, seq: i32, key_start: i32, klen: i32, window: i32) -
     let allowed = causal.logical_and(&in_window)?;
     let zero = Array::from_slice(&[0.0f32], &[1]);
     let masked = Array::from_slice(&[-1e30f32], &[1]);
-    let m = ops::r#where(&allowed, &zero, &masked)?;
+    let m = ops::r#where(&allowed, &zero, &masked)?.as_dtype(dtype)?;
     Ok(m.reshape(&[1, 1, seq, klen])?)
 }
 
@@ -482,8 +497,11 @@ pub fn pick(logits: &Array, temperature: f32, top_p: f32) -> Result<i32> {
         let next = ops::indexing::argmax(logits, false)?;
         Ok(next.item::<u32>() as i32)
     } else {
-        logits.eval()?;
-        Ok(sample_top_p(logits.as_slice::<f32>(), temperature, top_p))
+        // The CPU sampler reads an f32 slice; bf16 families hand bf16 logits,
+        // so widen the single row here (a no-op copy for f32 families).
+        let row = logits.as_dtype(Dtype::Float32)?;
+        row.eval()?;
+        Ok(sample_top_p(row.as_slice::<f32>(), temperature, top_p))
     }
 }
 

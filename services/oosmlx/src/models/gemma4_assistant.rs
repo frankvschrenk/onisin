@@ -26,12 +26,12 @@
 use std::path::Path;
 
 use anyhow::{anyhow, bail, Context, Result};
-use mlx_rs::{fast, nn, Array};
+use mlx_rs::{fast, Array};
 use oos_infer::ModelFiles;
 use serde::Deserialize;
 
 use super::gemma4::{
-    load_weights, proportional_freqs, LayerKind, QLinear, QuantConfig, RopeParameters,
+    load_weights, proportional_freqs, LayerKind, QLinear, QuantConfig, RopeParameters, COMPUTE,
 };
 
 /// Drafter text-tower parameters from config.json's `text_config`. Same field
@@ -128,13 +128,18 @@ const MASKED: f32 = -1e30;
 /// positions are absolute (`0..klen`) because our target cache concatenates
 /// instead of rotating; mlx-vlm's local-window remapping is a rotating-cache
 /// artifact we don't have.
-fn bidirectional_mask(position: i32, seq: i32, klen: i32, window: Option<i32>) -> Option<Array> {
+fn bidirectional_mask(
+    position: i32,
+    seq: i32,
+    klen: i32,
+    window: Option<i32>,
+) -> Result<Option<Array>> {
     let w = match window {
-        None => return None,
+        None => return Ok(None),
         Some(w) => w,
     };
     if position + seq - 1 < w && klen - 1 - position < w {
-        return None;
+        return Ok(None);
     }
     let mut data = vec![0.0f32; (seq * klen) as usize];
     for qi in 0..seq {
@@ -146,7 +151,10 @@ fn bidirectional_mask(position: i32, seq: i32, klen: i32, window: Option<i32>) -
             }
         }
     }
-    Some(Array::from_slice(&data, &[1, 1, seq, klen]))
+    // In the family's compute dtype so SDPA stays on its bf16 path.
+    Ok(Some(
+        Array::from_slice(&data, &[1, 1, seq, klen]).as_dtype(COMPUTE)?,
+    ))
 }
 
 /// One drafter attention block: Q/O projections and the Q norm only. K and V
@@ -209,7 +217,7 @@ impl DraftAttn {
         let klen = k.shape()[2];
         // Gemma 4 normalizes Q per head and runs SDPA at scale 1.0; the
         // borrowed K/V is already normed and RoPE'd by the target.
-        let o = match bidirectional_mask(position, seq, klen, window) {
+        let o = match bidirectional_mask(position, seq, klen, window)? {
             Some(m) => {
                 let mask = fast::ScaledDotProductAttentionMask::Array(&m);
                 fast::scaled_dot_product_attention(&q, k, v, 1.0, Some(mask), None)?
@@ -253,7 +261,7 @@ impl DraftLayer {
         let h = x.add(&attn)?;
 
         let ff = fast::rms_norm(&h, &self.pre_ff_ln, eps)?;
-        let gate = nn::gelu_approximate(&self.mlp_gate.forward(&ff)?)?;
+        let gate = super::gemma4::gelu_tanh(&self.mlp_gate.forward(&ff)?)?;
         let up = self.mlp_up.forward(&ff)?;
         let ff = self.mlp_down.forward(&gate.multiply(&up)?)?;
         let ff = fast::rms_norm(&ff, &self.post_ff_ln, eps)?;
@@ -284,11 +292,12 @@ impl Gemma4AssistantModel {
         let qcfg = QuantConfig::load(&files.config_json)
             .context("loading gemma4_assistant quant config")?;
 
-        // Plain f32 fetch for norms and scalars (checkpoint ships them bf16).
+        // Norms and scalars in the family's compute dtype, matching the
+        // target's activations the drafter consumes.
         let get = |name: &str| -> Result<Array> {
             w.get(name)
                 .ok_or_else(|| anyhow!("missing tensor {name}"))
-                .and_then(|a| Ok(a.as_type::<f32>()?))
+                .and_then(|a| Ok(a.as_dtype(COMPUTE)?))
         };
 
         // Unlike the multimodal 26B target, the drafter checkpoint is bare:
@@ -414,7 +423,11 @@ mod fake_target_smoke {
             let u = ((s >> 40) & 0xFFFFFF) as f32 / 16_777_216.0;
             v.push((u - 0.5) * 0.04);
         }
+        // In the compute dtype: the drafter's norms are bf16 now, and mixing
+        // f32 fake-target state in would promote the stack mid-forward.
         Array::from_slice(&v, shape)
+            .as_dtype(COMPUTE)
+            .expect("dtype cast")
     }
 
     /// Reduce to a scalar on-device and read back one value, to assert a
@@ -424,6 +437,7 @@ mod fake_target_smoke {
         while !r.shape().is_empty() {
             r = r.sum_axes(&[0], false)?;
         }
+        let r = r.as_dtype(mlx_rs::Dtype::Float32)?;
         r.eval()?;
         Ok(r.item::<f32>())
     }
