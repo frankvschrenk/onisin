@@ -7,8 +7,15 @@
 # numbers, and the legs run strictly sequentially -- never two 26B-class
 # models resident at once (see task note on the 2026-06-11 swap incident).
 #
-# usage: bench.sh <hf-model-id> [ollama-tag] [gen-tokens]
+# usage: bench.sh <hf-model-id> [ollama-tag] [gen-tokens] [prompt-mult]
 #   bench.sh mlx-community/gemma-4-26b-a4b-it-nvfp4 gemma4:26b-mlx 256
+#   bench.sh mlx-community/gemma-4-26b-a4b-it-4bit "" 256 206   # ~7.2k context
+#
+# prompt-mult scales the filler prompt: 55 (default) is ~2k tokens, 206 is
+# ~7.2k -- the long-context regime where prefill chunking and the KV ring
+# carry the load. The oosmlx leg also reports a temperature-0.7 decode line:
+# that is the default request path (on-device sampler included), which the
+# temp-0 measurement alone cannot see regress.
 #
 # The Ollama leg is skipped when no tag is given. The mlx_lm leg expects a
 # venv with mlx-lm installed; override with MLXLM_PYTHON (default
@@ -17,22 +24,24 @@
 set -u
 cd "$(dirname "$0")/../../.."
 
-MODEL="${1:?usage: bench.sh <hf-model-id> [ollama-tag] [gen-tokens]}"
+MODEL="${1:?usage: bench.sh <hf-model-id> [ollama-tag] [gen-tokens] [prompt-mult]}"
 OLLAMA_TAG="${2:-}"
 GEN="${3:-256}"
+MULT="${4:-55}"
 PORT="${OOSMLX_BENCH_PORT:-8093}"
 MLXLM_PYTHON="${MLXLM_PYTHON:-/tmp/mlxlm-venv/bin/python}"
 PROMPT_FILE=/tmp/oosmlx_bench_prompt.txt
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-# Deterministic ~2k-token prompt: long enough that prefill dominates its
-# phase and the sliding-window (1024) machinery is exercised, small enough
-# that a full leg stays in the tens of seconds.
-python3 - "$PROMPT_FILE" <<'PYEOF'
+# Deterministic filler prompt, MULT repetitions of ~36 tokens: at the default
+# 55 (~2k tokens) prefill dominates its phase and the sliding-window (1024)
+# machinery is exercised while a full leg stays in the tens of seconds; 206
+# (~7.2k) probes the long-context regime.
+python3 - "$PROMPT_FILE" "$MULT" <<'PYEOF'
 import sys
 filler = ("Die Lagerhalle in Dortmund verzeichnete im dritten Quartal "
           "einen deutlichen Anstieg der Durchlaufzeiten, weil die neue "
-          "Sortieranlage erst teilweise kalibriert war. ") * 55
+          "Sortieranlage erst teilweise kalibriert war. ") * int(sys.argv[2])
 open(sys.argv[1], "w").write(
     filler + "\nFasse den obigen Text ausfuehrlich zusammen und bewerte die Lage.")
 PYEOF
@@ -67,10 +76,10 @@ python3 - "$MODEL" "$PORT" "$PROMPT_FILE" "$GEN" <<'PYEOF'
 import json, sys, urllib.request
 model, port, pf, gen = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 prompt = open(pf).read()
-def chat(max_tokens):
+def chat(max_tokens, temp=0):
     req = json.dumps({"model": model,
                       "messages": [{"role": "user", "content": prompt}],
-                      "temperature": 0, "max_tokens": max_tokens}).encode()
+                      "temperature": temp, "max_tokens": max_tokens}).encode()
     r = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions",
                                data=req, headers={"Content-Type": "application/json"})
     return json.load(urllib.request.urlopen(r, timeout=1800))
@@ -78,15 +87,23 @@ chat(8)        # warmup: load + kernel compile
 resp = chat(gen)
 if "error" in resp:
     print("oosmlx error:", resp["error"]["message"]); sys.exit(1)
+# Default-path run: temperature 0.7 exercises the on-device sampler, whose
+# cost the greedy measurement cannot see.
+resp = chat(gen, 0.7)
+if "error" in resp:
+    print("oosmlx error:", resp["error"]["message"]); sys.exit(1)
 PYEOF
 [ $? -ne 0 ] && exit 1
 kill $SRV 2>/dev/null; wait $SRV 2>/dev/null; trap - EXIT
-# The measured run is the last phases line the server logged.
-phases=$(grep -o 'generation phases.*' "$LOG" | sed 's/\x1b\[[0-9;]*m//g' | tail -1)
+# The last two phases lines are the temp-0 and the temp-0.7 measured runs.
+phases=$(grep -o 'generation phases.*' "$LOG" | sed 's/\x1b\[[0-9;]*m//g' | tail -2 | head -1)
 prefill=$(echo "$phases" | grep -o 'prefill_tps=[0-9]*' | cut -d= -f2)
 decode=$(echo "$phases" | grep -o 'decode_tps=[0-9]*' | cut -d= -f2)
 ptok=$(echo "$phases" | grep -o 'prompt_tokens=[0-9]*' | cut -d= -f2)
 echo "LEG oosmlx prefill_tps=$prefill decode_tps=$decode (prompt=$ptok gen=$GEN)"
+phases=$(grep -o 'generation phases.*' "$LOG" | sed 's/\x1b\[[0-9;]*m//g' | tail -1)
+decode=$(echo "$phases" | grep -o 'decode_tps=[0-9]*' | cut -d= -f2)
+echo "LEG oosmlx-temp0.7 decode_tps=$decode (default request path)"
 
 echo "== leg 2: mlx_lm ($MODEL) =="
 if [ ! -x "$MLXLM_PYTHON" ]; then
