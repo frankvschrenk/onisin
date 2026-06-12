@@ -103,7 +103,9 @@ impl SpecPair {
             return Ok(out);
         }
 
-        let mut cache = KvCache::new(self.target.num_layers());
+        // Linear cache: the rollback below must restore positions a rotating
+        // sliding-window slot would already have evicted.
+        let mut cache = KvCache::new_linear(self.target.num_layers());
 
         // Prefill through the export hooks. The greedy next token (the
         // "bonus") seeds the first draft block; the last pre-norm hidden row

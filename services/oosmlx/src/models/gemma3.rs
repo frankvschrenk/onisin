@@ -12,14 +12,14 @@
 
 use anyhow::{anyhow, Context, Result};
 use mlx_rs::ops::indexing::IndexOp;
-use mlx_rs::{fast, nn, ops, Array};
+use mlx_rs::{fast, nn, Array};
 use oos_infer::openai::ChatMessage;
 use oos_infer::ModelFiles;
 use serde::Deserialize;
 use std::path::Path;
 use tokenizers::Tokenizer;
 
-use super::{KvCache, Model};
+use super::{step_masks, KvCache, KvSlot, MaskKind, Model, StepMasks};
 
 /// Gemma 3 architecture parameters, parsed from config.json.
 ///
@@ -94,32 +94,6 @@ fn linear(x: &Array, w: &Array) -> Result<Array> {
     Ok(x.matmul(&w.transpose()?)?)
 }
 
-/// Build an additive attention mask of shape `[1, 1, seq, klen]`.
-///
-/// Built by hand rather than via MLX's `Causal` mode because the local layers
-/// need a sliding window, which the built-in causal mask can't express; one
-/// explicit builder keeps global and local layers on a single auditable path.
-/// Query row `qi` sits at absolute position `offset + qi`. `window` is `None`
-/// for global layers and `Some(w)` for local ones. Disallowed positions get a
-/// large finite negative -- effectively -inf for the softmax, but finite to
-/// avoid NaN; every row keeps at least its own position, so none is fully
-/// masked.
-fn attention_mask(offset: i32, seq: i32, klen: i32, window: Option<i32>) -> Array {
-    const MASKED: f32 = -1e30;
-    let mut data = vec![0.0f32; (seq * klen) as usize];
-    for qi in 0..seq {
-        let qpos = offset + qi;
-        for kj in 0..klen {
-            let causal = kj <= qpos;
-            let in_window = window.map_or(true, |w| qpos - kj < w);
-            if !(causal && in_window) {
-                data[(qi * klen + kj) as usize] = MASKED;
-            }
-        }
-    }
-    Array::from_slice(&data, &[1, 1, seq, klen])
-}
-
 /// One transformer block's weights (all f32).
 struct Layer {
     input_ln: Array,
@@ -146,7 +120,8 @@ impl Layer {
         x: &Array,
         cfg: &Gemma3Config,
         offset: i32,
-        cache: &mut Option<(Array, Array)>,
+        mask: &MaskKind,
+        slot: &mut KvSlot,
     ) -> Result<Array> {
         let seq = x.shape()[0];
         let n = cfg.num_attention_heads as i32;
@@ -169,21 +144,18 @@ impl Layer {
         let v = linear(x, &self.v_proj)?.reshape(&[1, seq, nkv, hd])?;
         let v = v.transpose_axes(&[0, 2, 1, 3])?;
 
-        // Append this step's K/V to the running cache, then attend over the
-        // full history (stored post-RoPE in head-major [1, nkv, past, hd]).
-        let (k, v) = match cache.take() {
-            Some((pk, pv)) => (
-                ops::concatenate_axis(&[pk, k], 2)?,
-                ops::concatenate_axis(&[pv, v], 2)?,
-            ),
-            None => (k, v),
-        };
-        *cache = Some((k.clone(), v.clone()));
+        // The slot persists this step's K/V in place (post-RoPE, head-major
+        // [1, nkv, past, hd]; ring-rotated on local layers) and hands back
+        // the K/V to attend over; the mask built in `step_masks` matches the
+        // slot's retention geometry.
+        let (k, v) = slot.update(&k, &v, self.sliding_window)?;
 
-        let klen = k.shape()[2];
-        let mask = attention_mask(offset, seq, klen, self.sliding_window);
-        let mask = fast::ScaledDotProductAttentionMask::Array(&mask);
-        let o = fast::scaled_dot_product_attention(&q, &k, &v, cfg.attn_scale(), Some(mask), None)?;
+        let sdpa_mask = match mask {
+            MaskKind::None => None,
+            MaskKind::Causal => Some(fast::ScaledDotProductAttentionMask::Causal),
+            MaskKind::Mask(m) => Some(fast::ScaledDotProductAttentionMask::Array(m)),
+        };
+        let o = fast::scaled_dot_product_attention(&q, &k, &v, cfg.attn_scale(), sdpa_mask, None)?;
 
         let o = o.transpose_axes(&[0, 2, 1, 3])?.reshape(&[seq, n * hd])?;
         linear(&o, &self.o_proj)
@@ -194,13 +166,19 @@ impl Layer {
         x: &Array,
         cfg: &Gemma3Config,
         offset: i32,
-        cache: &mut Option<(Array, Array)>,
+        masks: &StepMasks,
+        slot: &mut KvSlot,
     ) -> Result<Array> {
         let eps = cfg.rms_norm_eps;
+        let mask = if self.sliding_window.is_some() {
+            &masks.sliding
+        } else {
+            &masks.full
+        };
 
         // Attention block with sandwich norm: residual + post_attn(attn(input_ln(x))).
         let normed = fast::rms_norm(x, &self.input_ln, eps)?;
-        let attn = self.attention(&normed, cfg, offset, cache)?;
+        let attn = self.attention(&normed, cfg, offset, mask, slot)?;
         let attn = fast::rms_norm(&attn, &self.post_attn_ln, eps)?;
         let h = x.add(&attn)?;
 
@@ -298,8 +276,14 @@ impl Gemma3Model {
         let mut h = self.embed.index(&ids).multiply(&scale)?;
 
         let offset = cache.offset() as i32;
+        let masks = step_masks(
+            offset,
+            seq,
+            self.cfg.sliding_window as i32,
+            !cache.is_linear(),
+        )?;
         for (layer, slot) in self.layers.iter().zip(cache.slots_mut().iter_mut()) {
-            h = layer.forward(&h, &self.cfg, offset, slot)?;
+            h = layer.forward(&h, &self.cfg, offset, &masks, slot)?;
         }
         cache.advance(tokens.len());
 

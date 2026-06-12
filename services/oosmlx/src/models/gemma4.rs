@@ -26,7 +26,7 @@ use std::path::Path;
 use tokenizers::Tokenizer;
 
 use super::gemma4_assistant::SharedKv;
-use super::{toolfmt, KvCache, Model};
+use super::{step_masks, toolfmt, KvCache, KvSlot, MaskKind, Model, StepMasks};
 
 /// Gemma 4 text-tower parameters, parsed from config.json's `text_config`.
 ///
@@ -508,68 +508,6 @@ impl Gemma4Model {
     }
 }
 
-/// One step's attention masks, built once per forward step and shared by all
-/// layers. This replaces a host-side per-layer builder that filled a
-/// `[seq, klen]` f32 mask in a CPU loop and uploaded it 30 times per step --
-/// at long prompts that dominated prefill completely (a 13k prefill spent
-/// minutes building ~700MB masks thirty times over).
-pub(super) struct StepMasks {
-    full: MaskKind,
-    sliding: MaskKind,
-}
-
-pub(super) enum MaskKind {
-    /// No mask needed: a single decode query attends its whole history.
-    None,
-    /// SDPA's fused causal mode; nothing is materialized. MLX aligns the
-    /// queries to the *last* `seq` key positions, which matches the
-    /// cached-prefix layout (including speculative multi-token verify steps).
-    Causal,
-    /// An explicit additive mask, built on device (sliding window only).
-    Mask(Array),
-}
-
-/// Build the masks for one step over `klen = offset + seq` key positions.
-fn step_masks(offset: i32, seq: i32, window: i32) -> Result<StepMasks> {
-    let klen = offset + seq;
-    let full = if seq <= 1 {
-        MaskKind::None
-    } else {
-        MaskKind::Causal
-    };
-    let sliding = if klen <= window {
-        // Inside the window the sliding constraint is vacuous and the mask
-        // degenerates to plain causal.
-        if seq <= 1 {
-            MaskKind::None
-        } else {
-            MaskKind::Causal
-        }
-    } else {
-        MaskKind::Mask(sliding_mask(offset, seq, klen, window)?)
-    };
-    Ok(StepMasks { full, sliding })
-}
-
-/// Additive sliding-window mask `[1, 1, seq, klen]`, built on device: the
-/// position grids come from `arange`, the comparisons and the select stay
-/// lazy MLX ops, so nothing crosses the host. Query row `qi` sits at
-/// absolute position `offset + qi`; a position is allowed when causal
-/// (`kj <= qpos`) and within the window (`qpos - kj < window`). Disallowed
-/// positions get a large finite negative -- effectively -inf for the
-/// softmax, but finite to avoid NaN.
-fn sliding_mask(offset: i32, seq: i32, klen: i32, window: i32) -> Result<Array> {
-    let q = Array::arange::<_, i32>(offset, offset + seq, None)?.reshape(&[seq, 1])?;
-    let k = Array::arange::<_, i32>(0, klen, None)?.reshape(&[1, klen])?;
-    let causal = k.le(&q)?;
-    let in_window = q.subtract(&k)?.lt(&Array::from_int(window))?;
-    let allowed = causal.logical_and(&in_window)?;
-    let zero = Array::from_slice(&[0.0f32], &[1]);
-    let masked = Array::from_slice(&[-1e30f32], &[1]);
-    let m = ops::r#where(&allowed, &zero, &masked)?;
-    Ok(m.reshape(&[1, 1, seq, klen])?)
-}
-
 /// RMSNorm with a unit (no-scale) weight -- Gemma 4's V normalization.
 fn rms_no_scale(x: &Array, eps: f32) -> Result<Array> {
     let dim = *x.shape().last().unwrap();
@@ -621,7 +559,8 @@ impl Attn {
         mask: &MaskKind,
         offset: i32,
         full_freqs: &Array,
-        cache: &mut Option<(Array, Array)>,
+        window: Option<i32>,
+        slot: &mut KvSlot,
     ) -> Result<Array> {
         let seq = x.shape()[0];
         let (n, nkv, hd) = (self.n_heads, self.n_kv_heads, self.head_dim);
@@ -643,14 +582,10 @@ impl Attn {
         let k = self.apply_rope(&k, offset, full_freqs)?;
         let v = rms_no_scale(&v_raw, eps)?.transpose_axes(&[0, 2, 1, 3])?;
 
-        let (k, v) = match cache.take() {
-            Some((pk, pv)) => (
-                ops::concatenate_axis(&[pk, k], 2)?,
-                ops::concatenate_axis(&[pv, v], 2)?,
-            ),
-            None => (k, v),
-        };
-        *cache = Some((k.clone(), v.clone()));
+        // The slot persists this step's K/V (in place, ring-rotated on
+        // sliding layers) and hands back the K/V to attend over; the mask
+        // built in `step_masks` matches the slot's retention geometry.
+        let (k, v) = slot.update(&k, &v, window)?;
 
         // Gemma 4 normalizes Q/K per head and runs SDPA at scale 1.0. The
         // mask was built once for the whole step; None and Causal run the
@@ -722,19 +657,19 @@ impl Layer {
         offset: i32,
         full_freqs: &Array,
         masks: &StepMasks,
-        cache: &mut Option<(Array, Array)>,
+        slot: &mut KvSlot,
     ) -> Result<Array> {
         let eps = cfg.rms_norm_eps;
-        let mask = match self.attn.kind {
-            LayerKind::Sliding => &masks.sliding,
-            LayerKind::Full => &masks.full,
+        let (mask, window) = match self.attn.kind {
+            LayerKind::Sliding => (&masks.sliding, Some(cfg.sliding_window as i32)),
+            LayerKind::Full => (&masks.full, None),
         };
 
         // Attention with sandwich norm.
         let normed = fast::rms_norm(x, &self.input_ln, eps)?;
         let attn = self
             .attn
-            .forward(&normed, eps, mask, offset, full_freqs, cache)?;
+            .forward(&normed, eps, mask, offset, full_freqs, window, slot)?;
         let attn = fast::rms_norm(&attn, &self.post_attn_ln, eps)?;
         let h = x.add(&attn)?;
 
@@ -801,7 +736,12 @@ impl Gemma4Model {
     pub(super) fn forward_hidden(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
         let mut h = self.embed(tokens)?;
         let offset = cache.offset() as i32;
-        let masks = step_masks(offset, tokens.len() as i32, self.cfg.sliding_window as i32)?;
+        let masks = step_masks(
+            offset,
+            tokens.len() as i32,
+            self.cfg.sliding_window as i32,
+            !cache.is_linear(),
+        )?;
         for (layer, slot) in self.layers.iter().zip(cache.slots_mut().iter_mut()) {
             h = layer.forward(&h, &self.cfg, offset, &self.full_freqs, &masks, slot)?;
         }
@@ -833,11 +773,11 @@ impl Gemma4Model {
     pub(super) fn shared_kv(&self, cache: &KvCache) -> Result<SharedKv> {
         let mut full = None;
         let mut sliding = None;
-        for (layer, slot) in self.layers.iter().zip(cache.slots()) {
-            if let Some(kv) = slot {
+        for (i, layer) in self.layers.iter().enumerate() {
+            if let Some(kv) = cache.layer_kv(i)? {
                 match layer.attn.kind {
-                    LayerKind::Full => full = Some(kv.clone()),
-                    LayerKind::Sliding => sliding = Some(kv.clone()),
+                    LayerKind::Full => full = Some(kv),
+                    LayerKind::Sliding => sliding = Some(kv),
                 }
             }
         }
@@ -1204,7 +1144,12 @@ mod numdiff {
         let mut cache = KvCache::new(model.cfg.num_hidden_layers);
         let mut h = model.embed(&ids)?;
         dump.push(("embed".to_string(), h.clone()));
-        let masks = step_masks(0, ids.len() as i32, model.cfg.sliding_window as i32)?;
+        let masks = step_masks(
+            0,
+            ids.len() as i32,
+            model.cfg.sliding_window as i32,
+            !cache.is_linear(),
+        )?;
         for (i, (layer, slot)) in model
             .layers
             .iter()
