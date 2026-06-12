@@ -497,59 +497,98 @@ pub fn pick(logits: &Array, temperature: f32, top_p: f32) -> Result<i32> {
         let next = ops::indexing::argmax(logits, false)?;
         Ok(next.item::<u32>() as i32)
     } else {
-        // The CPU sampler reads an f32 slice; bf16 families hand bf16 logits,
-        // so widen the single row here (a no-op copy for f32 families).
-        let row = logits.as_dtype(Dtype::Float32)?;
-        row.eval()?;
-        Ok(sample_top_p(row.as_slice::<f32>(), temperature, top_p))
+        let next = sample_top_p(logits, temperature, top_p)?;
+        Ok(next.item::<u32>() as i32)
     }
 }
 
-/// Top-p (nucleus) sampling over one logit row, with temperature.
+/// Top-p (nucleus) sampling over one logit row, with temperature, built as
+/// lazy device ops in the mlx_lm sampler shape: softmax over the scaled row,
+/// ascending argsort plus cumulative sum, zero out everything outside the
+/// nucleus, draw with `categorical` over the masked log-probabilities, and
+/// map the draw back through the sort order.
 ///
-/// Done on the CPU: trivial to read against a reference, and the per-token cost
-/// (one softmax + one sort of the vocab) is negligible next to the forward
-/// pass. On-device sampling is a later optimisation. `temperature` is > 0 here.
-fn sample_top_p(logits: &[f32], temperature: f32, top_p: f32) -> i32 {
-    // Temperature-scaled softmax, shifted by the max for numerical stability
-    // (max of the scaled logits equals max(logits)/temperature for T > 0).
-    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let mut probs: Vec<f32> = logits
-        .iter()
-        .map(|&l| ((l - max) / temperature).exp())
-        .collect();
-    let sum: f32 = probs.iter().sum();
-    for p in &mut probs {
-        *p /= sum;
+/// On device because the previous CPU sampler pulled the full f32 logit row
+/// (1 MB on a 262k vocabulary) to the host and sorted it -- several ms per
+/// token on the *default* request path (GenParams temperature 0.7), invisible
+/// to the temp-0 benchmarks. Here the whole sampler fuses into the forward's
+/// evaluation and only a scalar crosses to the host. Softmax and cumsum run
+/// in f32: a 262k-element cumulative sum in bf16 drowns exactly the small
+/// tail probabilities top-p is supposed to weigh. `temperature` is > 0 here.
+fn sample_top_p(logits: &Array, temperature: f32, top_p: f32) -> Result<Array> {
+    let t = Array::from_slice(&[temperature], &[1]);
+    let scaled = logits.as_dtype(Dtype::Float32)?.divide(&t)?;
+    let probs = ops::softmax_axis(&scaled, -1, None)?;
+
+    // Ascending sort: the nucleus is every position whose inclusive
+    // cumulative mass exceeds 1 - top_p (the highest-probability tail).
+    let order = ops::argsort_axis(&probs, -1)?;
+    let sorted = ops::indexing::take_along_axis(&probs, &order, -1)?;
+    let cum = sorted.cumsum(-1, None, None)?;
+    let threshold = Array::from_slice(&[1.0 - top_p], &[1]);
+    let keep = cum.gt(&threshold)?;
+    let zero = Array::from_slice(&[0.0f32], &[1]);
+    let masked = ops::r#where(&keep, &sorted, &zero)?;
+
+    // `categorical` renormalises internally (softmax over log p restores the
+    // nucleus distribution; log 0 = -inf drops the masked positions) and
+    // draws an index into the sorted order; map it back to a vocabulary id.
+    let drawn = mlx_rs::random::categorical(&masked.log()?, None, None, None)?;
+    Ok(ops::indexing::take_along_axis(
+        &order,
+        &drawn.reshape(&[1])?,
+        -1,
+    )?)
+}
+
+#[cfg(all(test, feature = "mlx"))]
+mod sampler_tests {
+    use super::*;
+
+    /// Two MLX-touching tests on parallel harness threads segfault inside
+    /// Metal; the harness has no per-module serialization, so the tests take
+    /// this lock instead of requiring --test-threads=1.
+    static MLX_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A clear argmax with a collapsed nucleus must be picked every time:
+    /// top_p = 0.01 keeps only positions whose inclusive ascending cumulative
+    /// mass exceeds 0.99, which is the top token alone unless its probability
+    /// is under 0.01.
+    #[test]
+    fn collapsed_nucleus_is_greedy() -> Result<()> {
+        let _guard = MLX_LOCK.lock().expect("mlx test lock");
+        let logits = Array::from_slice(&[0.0f32, 1.0, 2.0, 10.0], &[4]);
+        for _ in 0..50 {
+            let tok = sample_top_p(&logits, 0.8, 0.01)?;
+            assert_eq!(tok.item::<u32>(), 3);
+        }
+        Ok(())
     }
 
-    // Keep the smallest set of highest-probability tokens whose mass reaches
-    // top_p (the nucleus).
-    let mut order: Vec<usize> = (0..probs.len()).collect();
-    order.sort_unstable_by(|&a, &b| probs[b].total_cmp(&probs[a]));
-    let mut cum = 0.0f32;
-    let mut nucleus_end = order.len();
-    for (rank, &i) in order.iter().enumerate() {
-        cum += probs[i];
-        if cum >= top_p {
-            nucleus_end = rank + 1;
-            break;
+    /// Classic nucleus boundary: probabilities (0.2, 0.3, 0.5) with
+    /// top_p = 0.6 keep exactly {0.5, 0.3} -- the 0.2 token must never be
+    /// drawn, and both nucleus members must appear over enough draws.
+    #[test]
+    fn nucleus_boundary_masks_the_tail() -> Result<()> {
+        let _guard = MLX_LOCK.lock().expect("mlx test lock");
+        let logits = Array::from_slice(&[0.2f32.ln(), 0.3f32.ln(), 0.5f32.ln()], &[3]);
+        let mut seen = [0usize; 3];
+        for _ in 0..200 {
+            // Temperature 1.0 keeps the constructed probabilities exact.
+            let tok = sample_top_p(&logits, 1.0, 0.6)?;
+            seen[tok.item::<u32>() as usize] += 1;
         }
+        assert_eq!(seen[0], 0, "tail token outside the nucleus was drawn");
+        assert!(
+            seen[1] > 0 && seen[2] > 0,
+            "nucleus member never drawn: {seen:?}"
+        );
+        assert!(
+            seen[2] > seen[1],
+            "draw frequencies ignore probability: {seen:?}"
+        );
+        Ok(())
     }
-    let nucleus = &order[..nucleus_end];
-
-    // Sample within the nucleus, renormalised by its mass.
-    let mass: f32 = nucleus.iter().map(|&i| probs[i]).sum();
-    let mut r = rand::random::<f32>() * mass;
-    for &i in nucleus {
-        r -= probs[i];
-        if r <= 0.0 {
-            return i as i32;
-        }
-    }
-    // Floating-point slack can let the loop fall through; the last nucleus
-    // token is the safe choice.
-    nucleus[nucleus.len() - 1] as i32
 }
 
 #[derive(serde::Deserialize)]
