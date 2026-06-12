@@ -13,6 +13,7 @@
 
 mod gemma3;
 mod gemma4;
+mod mistral;
 mod toolfmt;
 // Not a `Model` family: the MTP drafter for speculative decoding. It is
 // consumed by the speculative round-loop, not by `load`'s dispatch.
@@ -639,7 +640,11 @@ pub fn load(files: &ModelFiles, tokenizer: &Tokenizer) -> Result<Box<dyn Model>>
         })
     } else if lower.contains("gemma3") {
         Ok(Box::new(gemma3::Gemma3Model::load(files, tokenizer)?))
+    } else if lower.contains("mistral3") || lower.contains("ministral3") {
+        // "Mistral3ForConditionalGeneration" is a multimodal wrapper around
+        // the ministral3 text tower; the family reads text_config itself.
+        Ok(Box::new(mistral::MistralModel::load(files, tokenizer)?))
     } else {
-        bail!("unsupported model architecture: {arch} (supported: gemma3, gemma4)")
+        bail!("unsupported model architecture: {arch} (supported: gemma3, gemma4, ministral3)")
     }
 }

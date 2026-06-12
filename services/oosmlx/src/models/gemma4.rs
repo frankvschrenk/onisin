@@ -160,6 +160,25 @@ pub(super) struct QLinear {
 }
 
 impl QLinear {
+    /// Gather the packed rows for `ids` and dequantize just those -- the
+    /// quantized-embedding lookup. Output dtype follows the format's scales;
+    /// callers cast to their compute dtype. pub(super): the mistral family
+    /// shares the quant infrastructure (same checkpoints' format axis).
+    pub(super) fn dequant_rows(&self, ids: &Array) -> Result<Array> {
+        use mlx_rs::ops::indexing::IndexOp;
+        let w = self.weight.index(ids);
+        let s = self.scales.index(ids);
+        let b = self.biases.as_ref().map(|bz| bz.index(ids));
+        Ok(ops::dequantize(
+            &w,
+            &s,
+            b.as_ref(),
+            self.group_size,
+            self.bits,
+            self.mode.as_deref(),
+        )?)
+    }
+
     pub(super) fn forward(&self, x: &Array) -> Result<Array> {
         Ok(ops::quantized_matmul(
             x,
