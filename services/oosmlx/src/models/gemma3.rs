@@ -266,9 +266,10 @@ impl Gemma3Model {
         })
     }
 
-    /// Run `tokens` through the model, updating `cache`, returning logits
-    /// `[tokens, vocab]`.
-    fn forward(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
+    /// Run the layer stack, updating `cache`, returning the *pre-final-norm*
+    /// hidden states `[tokens, hidden]`. Final norm and LM head live in
+    /// `forward_logits`, which projects only the row it keeps.
+    fn forward_hidden(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
         let seq = tokens.len() as i32;
         let ids = Array::from_slice(tokens, &[seq]);
 
@@ -288,9 +289,7 @@ impl Gemma3Model {
             h = layer.forward(&h, &self.cfg, offset, &masks, slot)?;
         }
         cache.advance(tokens.len());
-
-        let h = fast::rms_norm(&h, &self.final_norm, self.cfg.rms_norm_eps)?;
-        Ok(h.matmul(&self.lm_head.transpose()?)?)
+        Ok(h)
     }
 }
 
@@ -300,8 +299,14 @@ impl Model for Gemma3Model {
     }
 
     fn forward_logits(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
-        let logits = self.forward(tokens, cache)?;
-        Ok(logits.index(tokens.len() as i32 - 1))
+        // Project only the position we keep: a prefill's [seq, vocab] logits
+        // are one large matmul of which a single row survives, and MLX's
+        // laziness cannot prune inside a single matmul node. Final norm and
+        // LM head are row-wise, so slicing first is exact.
+        let h = self.forward_hidden(tokens, cache)?;
+        let last = h.index(tokens.len() as i32 - 1).reshape(&[1, -1])?;
+        let last = fast::rms_norm(&last, &self.final_norm, self.cfg.rms_norm_eps)?;
+        Ok(last.matmul(&self.lm_head.transpose()?)?.index(0))
     }
 
     /// Gemma chat format for the last user turn. The turn markers are added

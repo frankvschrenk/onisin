@@ -890,11 +890,6 @@ impl Gemma4Model {
         Ok(ops::tanh(&logits.divide(&cap_a)?)?.multiply(&cap_a)?)
     }
 
-    fn forward(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
-        let h = self.forward_hidden(tokens, cache)?;
-        self.project_logits(&h)
-    }
-
     /// Export the drafter's borrowed target state from the KV cache: the
     /// accumulated post-RoPE K/V of the *last* full-attention and *last*
     /// sliding-attention layers. Iteration order makes "last wins" implicit;
@@ -925,8 +920,13 @@ impl Model for Gemma4Model {
 
     fn forward_logits(&self, tokens: &[i32], cache: &mut KvCache) -> Result<Array> {
         use mlx_rs::ops::indexing::IndexOp;
-        let logits = self.forward(tokens, cache)?;
-        Ok(logits.index(tokens.len() as i32 - 1))
+        // Project only the position we keep: a long prefill's [seq, vocab]
+        // logits are one huge quantized matmul plus softcap of which a single
+        // row survives, and MLX's laziness cannot prune inside a single node.
+        // Norm, head and softcap are row-wise, so slicing first is exact.
+        let h = self.forward_hidden(tokens, cache)?;
+        let last = h.index(tokens.len() as i32 - 1).reshape(&[1, -1])?;
+        Ok(self.project_logits(&last)?.index(0))
     }
 
     fn render_prompt(
