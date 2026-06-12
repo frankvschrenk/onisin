@@ -239,6 +239,24 @@ fn run_generation(
             // stay separately comparable against other runtimes.
             let t0 = std::time::Instant::now();
             let mut prefill: Option<std::time::Duration> = None;
+            // Chunked prefill: a long prompt runs through the layers in
+            // fixed-size pieces, the last piece staying with the loop so its
+            // logits feed the first pick. Per-chunk sliding masks stay small
+            // ([chunk, window+chunk] instead of [prompt, prompt]) and the
+            // eval at each boundary bounds the graph and peak memory; mlx_lm
+            // prefills the same way (prefill_step_size). Each chunk's single
+            // logit row is one cheap qmv -- the price of needing no extra
+            // trait surface.
+            let chunk = std::env::var("OOSMLX_PREFILL_CHUNK")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2048usize)
+                .max(1);
+            while step.len() > chunk {
+                let rest = step.split_off(chunk);
+                model.forward_logits(&step, &mut cache)?.eval()?;
+                step = rest;
+            }
             for _ in 0..params.max_tokens {
                 let logits = model.forward_logits(&step, &mut cache)?;
                 let next = crate::models::pick(&logits, params.temperature, params.top_p)?;
