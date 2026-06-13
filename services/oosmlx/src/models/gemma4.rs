@@ -570,7 +570,7 @@ fn rms_no_scale(x: &Array, eps: f32) -> Result<Array> {
 /// gather_qmm). `sorted` promises the kernel that `idx` is ascending, which
 /// lets it stream each expert's weights once instead of re-fetching them in
 /// routing order -- only valid on the sorted prefill path.
-fn gather(ql: &QLinear, x: &Array, idx: &Array, sorted: bool) -> Result<Array> {
+pub(super) fn gather(ql: &QLinear, x: &Array, idx: &Array, sorted: bool) -> Result<Array> {
     Ok(ops::gather_qmm(
         x,
         &ql.weight,

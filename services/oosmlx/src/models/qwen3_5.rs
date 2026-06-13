@@ -36,7 +36,7 @@ use oos_infer::ModelFiles;
 use serde::Deserialize;
 use tokenizers::Tokenizer;
 
-use super::gemma4::{load_weights, QLinear, QuantConfig};
+use super::gemma4::{gather, load_weights, QLinear, QuantConfig};
 use super::{DeltaState, KvCache, KvSlot, MaskKind, Model};
 
 /// Compute dtype: bf16 like the mlx_lm reference. The quantized matmuls emit
@@ -62,6 +62,12 @@ fn default_rope_theta() -> f32 {
 fn default_partial() -> f32 {
     0.25
 }
+fn default_true() -> bool {
+    true
+}
+fn default_sparse_step() -> usize {
+    1
+}
 
 /// qwen3_5 text-tower parameters, parsed from the wrapper's `text_config`.
 #[allow(dead_code)]
@@ -81,6 +87,22 @@ struct Qwen35Config {
     linear_key_head_dim: usize,
     linear_value_head_dim: usize,
     linear_conv_kernel_dim: usize,
+    // MoE (sparse FFN) parameters. Dense checkpoints (the 9B) omit them, so
+    // every field defaults; num_experts 0 means "dense MLP on every layer".
+    #[serde(default)]
+    num_experts: usize,
+    #[serde(default)]
+    num_experts_per_tok: usize,
+    #[serde(default)]
+    moe_intermediate_size: usize,
+    #[serde(default)]
+    shared_expert_intermediate_size: usize,
+    #[serde(default = "default_true")]
+    norm_topk_prob: bool,
+    #[serde(default = "default_sparse_step")]
+    decoder_sparse_step: usize,
+    #[serde(default)]
+    mlp_only_layers: Vec<usize>,
     rope_parameters: RopeParameters,
     // The checkpoint may omit this or ship it as JSON null; Option tolerates
     // both, where a plain `bool` with serde(default) would reject an explicit
@@ -113,6 +135,15 @@ impl Qwen35Config {
     /// `full_attention_interval`-th layer is full gated attention instead.
     fn is_linear(&self, idx: usize) -> bool {
         (idx + 1) % self.full_attention_interval != 0
+    }
+
+    /// Whether layer `idx` uses the sparse MoE FFN instead of the dense MLP.
+    /// Mirrors the reference dispatch: experts present, the layer is not in
+    /// `mlp_only_layers`, and it sits on a `decoder_sparse_step` boundary.
+    fn is_moe(&self, idx: usize) -> bool {
+        self.num_experts > 0
+            && !self.mlp_only_layers.contains(&idx)
+            && (idx + 1) % self.decoder_sparse_step == 0
     }
 
     /// Rotary dims for the partial RoPE: the first `head_dim * factor` head
@@ -555,13 +586,109 @@ enum Mixer {
 
 /// One decoder layer: pre-norm mixer (attention or delta) plus a pre-norm
 /// SwiGLU MLP, residual around each.
+/// SiLU keeping the activation in its input dtype (`x * sigmoid(x)`). An f32
+/// sigmoid constant would promote bf16 to f32 and cast-storm the FFN.
+fn silu(x: &Array) -> Result<Array> {
+    Ok(x.multiply(&ops::sigmoid(x)?)?)
+}
+
+/// Per-layer feed-forward: either a dense SwiGLU MLP or the sparse MoE block,
+/// chosen at load time by `Qwen35Config::is_moe`.
+enum Ffn {
+    Dense {
+        gate: QLinear,
+        up: QLinear,
+        down: QLinear,
+    },
+    Moe(Moe),
+}
+
+/// Sparse MoE FFN (Qwen3-Next / Qwen3.5 form): a plain top-k router over
+/// `num_experts` stacked SwiGLU experts (SwitchGLU via gather_qmm) plus an
+/// always-on shared expert, sigmoid-gated and summed in.
+struct Moe {
+    /// Router projection hidden -> num_experts (no bias, no pre-norm).
+    router: QLinear,
+    /// Stacked expert weights, addressed per top-k index by `gather`.
+    switch_gate: QLinear,
+    switch_up: QLinear,
+    switch_down: QLinear,
+    /// Dense shared expert applied to every token.
+    shared_gate: QLinear,
+    shared_up: QLinear,
+    shared_down: QLinear,
+    /// Scalar gate hidden -> 1 multiplying the shared expert's output.
+    shared_gate_proj: QLinear,
+}
+
+impl Moe {
+    /// Route to top-k experts, SwitchGLU over them, weight-combine, then add the
+    /// sigmoid-gated shared expert. `x` is the post-attention-normed input.
+    fn forward(
+        &self,
+        x: &Array,
+        num_experts: i32,
+        top_k: i32,
+        norm_topk: bool,
+        hidden: i32,
+    ) -> Result<Array> {
+        let seq = x.shape()[0];
+
+        // Router: plain projection, softmax over *all* experts, then top-k --
+        // the reference order (top-k of the full softmax), not softmax-of-top-k.
+        let scores = self.router.forward(x)?; // [seq, E]
+        let gates = ops::softmax_axis(&scores, -1, None)?;
+        let part = ops::argpartition_axis(&gates, -top_k, -1)?;
+        let last = Array::arange::<_, i32>(num_experts - top_k, num_experts, None)?;
+        let idx = ops::indexing::take_axis(&part, &last, -1)?; // [seq, k] expert ids
+        let mut weights = ops::indexing::take_along_axis(&gates, &idx, -1)?; // [seq, k]
+        if norm_topk {
+            let denom = weights.sum_axes(&[-1], true)?;
+            weights = weights.divide(&denom)?;
+        }
+
+        // SwitchGLU over the selected experts. Prefill sorts the (token, expert)
+        // pairs by expert id so gather_qmm streams each expert's weights once;
+        // single-token decode (n = top_k) stays on the plain path.
+        let n = seq * top_k;
+        let y = if n >= 64 {
+            let flat = idx.reshape(&[n])?;
+            let order = ops::argsort(&flat)?;
+            let inv_order = ops::argsort(&order)?;
+            let sorted_idx = ops::indexing::take(&flat, &order)?;
+            let rows = ops::floor_divide(&order, &Array::from_int(top_k))?;
+            let xs = ops::indexing::take_axis(x, &rows, 0)?.reshape(&[n, 1, hidden])?;
+            let up = gather(&self.switch_up, &xs, &sorted_idx, true)?;
+            let g = gather(&self.switch_gate, &xs, &sorted_idx, true)?;
+            let act = silu(&g)?.multiply(&up)?;
+            let down = gather(&self.switch_down, &act, &sorted_idx, true)?.reshape(&[n, hidden])?;
+            ops::indexing::take_axis(&down, &inv_order, 0)?.reshape(&[seq, top_k, hidden])?
+        } else {
+            let xe = ops::expand_dims_axes(x, &[-2, -3])?; // [seq, 1, 1, hidden]
+            let up = gather(&self.switch_up, &xe, &idx, false)?;
+            let g = gather(&self.switch_gate, &xe, &idx, false)?;
+            let act = silu(&g)?.multiply(&up)?;
+            gather(&self.switch_down, &act, &idx, false)?.reshape(&[seq, top_k, hidden])?
+        };
+        let w = ops::expand_dims_axes(&weights, &[-1])?; // [seq, k, 1]
+        let routed = w.multiply(&y)?.sum_axes(&[-2], false)?; // [seq, hidden]
+
+        // Shared expert: dense SwiGLU gated by sigmoid(shared_gate_proj(x)).
+        let shared = self.shared_down.forward(
+            &silu(&self.shared_gate.forward(x)?)?.multiply(&self.shared_up.forward(x)?)?,
+        )?;
+        let gate = ops::sigmoid(&self.shared_gate_proj.forward(x)?)?; // [seq, 1]
+        let shared = gate.multiply(&shared)?;
+
+        Ok(routed.add(&shared)?)
+    }
+}
+
 struct Layer {
     input_ln: Array,
     post_attn_ln: Array,
     mixer: Mixer,
-    gate: QLinear,
-    up: QLinear,
-    down: QLinear,
+    ffn: Ffn,
 }
 
 impl Layer {
@@ -583,13 +710,21 @@ impl Layer {
         };
         let h = x.add(&mixed)?;
 
-        // SwiGLU MLP, manual silu to keep bf16 end to end.
+        // FFN: dense SwiGLU or sparse MoE, on the post-attention-normed input.
         let normed = fast::rms_norm(&h, &self.post_attn_ln, eps)?;
-        let g = self.gate.forward(&normed)?;
-        let act = g.multiply(&ops::sigmoid(&g)?)?;
-        let mlp = self
-            .down
-            .forward(&act.multiply(&self.up.forward(&normed)?)?)?;
+        let mlp = match &self.ffn {
+            Ffn::Dense { gate, up, down } => {
+                let act = silu(&gate.forward(&normed)?)?;
+                down.forward(&act.multiply(&up.forward(&normed)?)?)?
+            }
+            Ffn::Moe(m) => m.forward(
+                &normed,
+                cfg.num_experts as i32,
+                cfg.num_experts_per_tok as i32,
+                cfg.norm_topk_prob,
+                cfg.hidden_size as i32,
+            )?,
+        };
         Ok(h.add(&mlp)?)
     }
 }
@@ -708,13 +843,37 @@ impl Qwen35Model {
                     k_norm: norm(&format!("{ap}.k_norm.weight"))?,
                 })
             };
+            // FFN: sparse MoE on MoE layers, dense SwiGLU otherwise. Names are
+            // post-`language_model.`-strip: router `mlp.gate` (8-bit per the
+            // quant config), stacked experts `mlp.switch_mlp.{gate,up,down}_proj`,
+            // dense shared expert `mlp.shared_expert.*`, scalar `shared_expert_gate`.
+            let ffn = if cfg.is_moe(i) {
+                let mp = format!("{p}.mlp");
+                Ffn::Moe(Moe {
+                    router: quant.qlinear(&weights, &format!("{mp}.gate"))?,
+                    switch_gate: quant.qlinear(&weights, &format!("{mp}.switch_mlp.gate_proj"))?,
+                    switch_up: quant.qlinear(&weights, &format!("{mp}.switch_mlp.up_proj"))?,
+                    switch_down: quant.qlinear(&weights, &format!("{mp}.switch_mlp.down_proj"))?,
+                    shared_gate: quant
+                        .qlinear(&weights, &format!("{mp}.shared_expert.gate_proj"))?,
+                    shared_up: quant.qlinear(&weights, &format!("{mp}.shared_expert.up_proj"))?,
+                    shared_down: quant
+                        .qlinear(&weights, &format!("{mp}.shared_expert.down_proj"))?,
+                    shared_gate_proj: quant
+                        .qlinear(&weights, &format!("{mp}.shared_expert_gate"))?,
+                })
+            } else {
+                Ffn::Dense {
+                    gate: quant.qlinear(&weights, &format!("{p}.mlp.gate_proj"))?,
+                    up: quant.qlinear(&weights, &format!("{p}.mlp.up_proj"))?,
+                    down: quant.qlinear(&weights, &format!("{p}.mlp.down_proj"))?,
+                }
+            };
             layers.push(Layer {
                 input_ln: norm(&format!("{p}.input_layernorm.weight"))?,
                 post_attn_ln: norm(&format!("{p}.post_attention_layernorm.weight"))?,
                 mixer,
-                gate: quant.qlinear(&weights, &format!("{p}.mlp.gate_proj"))?,
-                up: quant.qlinear(&weights, &format!("{p}.mlp.up_proj"))?,
-                down: quant.qlinear(&weights, &format!("{p}.mlp.down_proj"))?,
+                ffn,
             });
         }
 
