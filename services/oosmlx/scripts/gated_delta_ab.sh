@@ -21,7 +21,14 @@ GEN="${2:-80}"
 PORT="${OOSMLX_AB_PORT:-8095}"
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 unset OOSMLX_DRAFT_MODEL NATS_URL
+MULT="${3:-0}"
 USER_MSG="Erklaere in drei Saetzen, warum der Himmel blau ist."
+# With a prompt multiplier, build a long filler prompt: prefill runs the delta
+# recurrence over the whole prompt at once (T = prompt length), so this is where
+# the single-launch kernel beats the growing T-step ops graph.
+if [ "$MULT" -gt 0 ]; then
+  USER_MSG=$(python3 -c 'import sys; f=("Die Lagerhalle in Dortmund verzeichnete im dritten Quartal einen deutlichen Anstieg der Durchlaufzeiten, weil die neue Sortieranlage erst teilweise kalibriert war. ")*int(sys.argv[1]); print(f+"\nFasse den obigen Text in drei Saetzen zusammen.")' "$MULT")
+fi
 
 # Free any resident ollama model first (note 170: avoid memory pressure).
 resident=$(curl -s --max-time 3 127.0.0.1:11434/api/ps 2>/dev/null \
@@ -87,3 +94,11 @@ else
   echo "ops   [$i:]=${ops_out:$i:60}"
   echo "kernel[$i:]=${kern_out:$i:60}"
 fi
+
+# Prefill timing from each server log -- the decisive perf signal for long
+# context (decode is T=1, where kernel and ops are equivalent work).
+echo "=== prefill timing (last measured request) ==="
+for label in ops kernel; do
+  line=$(grep -o 'generation phases.*' "/tmp/oosmlx_gd_ab_${label}.log" 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | tail -1)
+  echo "[$label] ${line:-no phase line logged}"
+done
