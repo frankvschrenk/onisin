@@ -54,6 +54,17 @@ pub trait Model: Send {
         tools: &[oos_infer::openai::Tool],
     ) -> String;
 
+    /// Byte length of the leading portion of [`Model::render_prompt`]'s output
+    /// that a later turn reproduces verbatim as history. The prompt-prefix
+    /// cache snapshots here, so the next request -- which re-renders everything
+    /// up to this point identically -- extends the cache instead of
+    /// re-prefilling it. Defaults to the whole prompt; a family overrides this
+    /// only when its generation prompt ends in generation-only scaffolding that
+    /// never becomes history.
+    fn reusable_prefix_len(&self, rendered: &str) -> usize {
+        rendered.len()
+    }
+
     /// Token ids that stop generation (eos plus any turn terminator).
     fn stop_tokens(&self) -> &[i32];
 
@@ -116,6 +127,12 @@ pub struct ReasoningChannel {
 /// retain only the last `window` positions in a ring, capping their memory
 /// and making their single-token decode mask vacuous. Owned by the decode
 /// loop, so a `Model` stays stateless and shareable.
+///
+/// Cloning is shallow (MLX arrays are reference-counted) and relied upon by
+/// [`KvCache::snapshot`]: a later in-place slot write copy-on-writes the shared
+/// buffer rather than mutating the snapshot, because MLX never donates a buffer
+/// whose reference count is above one.
+#[derive(Clone)]
 pub struct KvCache {
     slots: Vec<KvSlot>,
     offset: usize,
@@ -154,6 +171,18 @@ impl KvCache {
     /// retention does that for single-token steps.
     pub fn is_linear(&self) -> bool {
         self.linear
+    }
+
+    /// A copy frozen at the current position, for the prompt-prefix cache.
+    ///
+    /// Why a frozen copy and not a rewind: a rotating sliding-window slot
+    /// cannot be trimmed back to an arbitrary prefix once it has wrapped
+    /// (mlx-lm leaves this unsolved for hybrid models, #980), so reuse never
+    /// rewinds -- it snapshots the cache at the prompt end and a later request
+    /// resumes from there when its prompt extends this one. The clone is
+    /// shallow; the next in-place write copy-on-writes, leaving this intact.
+    pub fn snapshot(&self) -> KvCache {
+        self.clone()
     }
 
     /// Advance the position counter after a step processed `n` tokens.
@@ -197,6 +226,7 @@ const GROW: i32 = 256;
 /// first `len` positions valid. Linear slots grow without bound; rotating
 /// slots (sliding-window layers) cap at the window and overwrite the oldest
 /// position ring-style.
+#[derive(Clone)]
 pub struct KvSlot {
     k: Option<Array>,
     v: Option<Array>,

@@ -36,6 +36,21 @@ struct Resident {
     id: String,
     tokenizer: Tokenizer,
     model: Box<dyn crate::models::Model>,
+    // Prompt-prefix KV cache from this model's last generic-loop request,
+    // frozen at the prompt end. Interior mutability so it can be swapped while
+    // `model` and `tokenizer` are borrowed for the same generation. Reset
+    // whenever the model is (re)loaded, so a snapshot never crosses models.
+    prefix: std::cell::RefCell<Option<PrefixCache>>,
+}
+
+/// A previous request's KV cache frozen at its prompt end, with the exact
+/// token ids it covers. The next request resumes from it when its prompt
+/// extends these ids verbatim, prefilling only the new tail; see
+/// [`run_generation`].
+#[cfg(feature = "mlx")]
+struct PrefixCache {
+    prompt_ids: Vec<i32>,
+    cache: crate::models::KvCache,
 }
 
 impl MlxEngine {
@@ -85,6 +100,7 @@ fn load_resident(id: &str) -> Result<Resident> {
         id: id.to_string(),
         tokenizer,
         model,
+        prefix: std::cell::RefCell::new(None),
     })
 }
 
@@ -158,6 +174,18 @@ impl Engine for MlxEngine {
     }
 }
 
+/// Whether prompt-prefix cache reuse is on (the default) or disabled via
+/// `OOSMLX_PREFIX_CACHE=0|off|false|no`. An escape hatch: it isolates the
+/// feature for an A/B against the no-reuse path, and disables it outright
+/// should a model ever prove the snapshot unsafe.
+#[cfg(feature = "mlx")]
+fn prefix_cache_enabled() -> bool {
+    !matches!(
+        std::env::var("OOSMLX_PREFIX_CACHE").ok().as_deref(),
+        Some("0" | "off" | "false" | "no")
+    )
+}
+
 /// The one generation path behind both Engine entry points: load or swap the
 /// resident model, render and encode the prompt, decode, and -- when `emit`
 /// is given -- stream incremental text along the way.
@@ -187,11 +215,28 @@ fn run_generation(
     let tokenizer = &resident.tokenizer;
 
     let prompt = model.render_prompt(messages, params.thinking, &params.tools);
+    // Reusable-prefix boundary for the prompt cache: the leading bytes a later
+    // turn reproduces verbatim as history. Any remainder is generation-only
+    // scaffolding (e.g. gemma4's empty thought-channel prefill); because it
+    // begins at a special-token boundary it tokenizes independently, so its
+    // token count subtracts cleanly from the prompt to give the freeze point.
+    let reuse_bytes = model.reusable_prefix_len(&prompt);
+    let nonreusable_suffix =
+        (reuse_bytes < prompt.len()).then(|| prompt[reuse_bytes..].to_string());
     let encoding = tokenizer
         .encode(prompt, false)
         .map_err(|e| anyhow!("tokenize: {e}"))?;
     let prompt_ids: Vec<i32> = encoding.get_ids().iter().map(|&u| u as i32).collect();
     let prompt_tokens = prompt_ids.len();
+    let reuse_boundary = match &nonreusable_suffix {
+        Some(suffix) => {
+            let suf = tokenizer
+                .encode(suffix.as_str(), false)
+                .map_err(|e| anyhow!("tokenize suffix: {e}"))?;
+            prompt_ids.len().saturating_sub(suf.get_ids().len())
+        }
+        None => prompt_ids.len(),
+    };
 
     let channel = model.reasoning_channel();
     // The `{name}\n` line the model opens its channel with; stripped from
@@ -228,7 +273,32 @@ fn run_generation(
     let out: Vec<u32> = match accelerated {
         Some(tokens) => tokens,
         None => {
-            let mut cache = crate::models::KvCache::new(model.num_layers());
+            // Prefix reuse: a previous generic-loop request on this model left
+            // its prompt-end KV snapshot here. When this prompt extends that
+            // one verbatim, resume from the snapshot and prefill only the new
+            // tail -- agent and chat loops re-send a growing prompt whose head
+            // is unchanged, and re-prefilling it dominates per-turn latency.
+            // Reuse only ever extends, never rewinds: a sliding-window
+            // family's rotating slots resume forward from the frozen end,
+            // sidestepping the prefix-trim a wrapped ring cannot do (and that
+            // mlx-lm leaves unsolved for hybrid models, #980).
+            let prefix_enabled = prefix_cache_enabled();
+            let prior = if prefix_enabled {
+                resident.prefix.borrow_mut().take()
+            } else {
+                None
+            };
+            let (mut cache, mut start) = match prior {
+                Some(p)
+                    if p.prompt_ids.len() < prompt_ids.len()
+                        && prompt_ids[..p.prompt_ids.len()] == p.prompt_ids[..] =>
+                {
+                    let at = p.prompt_ids.len();
+                    (p.cache, at)
+                }
+                _ => (crate::models::KvCache::new(model.num_layers()), 0usize),
+            };
+            let reused = start;
             let stop = model.stop_tokens();
             let mut out: Vec<u32> = Vec::new();
             let mut in_reasoning = false;
@@ -251,17 +321,12 @@ fn run_generation(
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(2048usize)
                 .max(1);
-            let mut start = 0usize;
-            while prompt_ids.len() - start > chunk {
+            while reuse_boundary - start > chunk {
                 let piece =
                     mlx_rs::Array::from_slice(&prompt_ids[start..start + chunk], &[chunk as i32]);
                 model.forward_logits(&piece, &mut cache)?.eval()?;
                 start += chunk;
             }
-            let tail = mlx_rs::Array::from_slice(
-                &prompt_ids[start..],
-                &[(prompt_ids.len() - start) as i32],
-            );
             // Pipelined decode in the mlx_lm shape: the pick stays a lazy
             // device array, and step n+1's graph is built and kicked with
             // async_eval *before* step n's token is synced to the host -- the
@@ -269,7 +334,47 @@ fn run_generation(
             // per-token sync. The lookahead past a stop token costs one
             // speculative forward, amortized over the whole completion; the
             // cache it touches is request-local.
-            let logits = model.forward_logits(&tail, &mut cache)?;
+            //
+            // The cache is frozen for the next request at the reusable
+            // boundary, before decode (or the generation-only scaffolding past
+            // it) mutates it -- a shallow clone the first later write
+            // copy-on-writes around. When the boundary is the whole prompt the
+            // freeze sits after the last prompt token and that forward yields
+            // the first-pick logits; otherwise the scaffolding tail past the
+            // boundary yields them.
+            let logits = if reuse_boundary == prompt_ids.len() {
+                let tail = mlx_rs::Array::from_slice(
+                    &prompt_ids[start..],
+                    &[(prompt_ids.len() - start) as i32],
+                );
+                let logits = model.forward_logits(&tail, &mut cache)?;
+                if prefix_enabled {
+                    *resident.prefix.borrow_mut() = Some(PrefixCache {
+                        prompt_ids: prompt_ids[..reuse_boundary].to_vec(),
+                        cache: cache.snapshot(),
+                    });
+                }
+                logits
+            } else {
+                if reuse_boundary > start {
+                    let piece = mlx_rs::Array::from_slice(
+                        &prompt_ids[start..reuse_boundary],
+                        &[(reuse_boundary - start) as i32],
+                    );
+                    model.forward_logits(&piece, &mut cache)?.eval()?;
+                }
+                if prefix_enabled {
+                    *resident.prefix.borrow_mut() = Some(PrefixCache {
+                        prompt_ids: prompt_ids[..reuse_boundary].to_vec(),
+                        cache: cache.snapshot(),
+                    });
+                }
+                let tail = mlx_rs::Array::from_slice(
+                    &prompt_ids[reuse_boundary..],
+                    &[(prompt_ids.len() - reuse_boundary) as i32],
+                );
+                model.forward_logits(&tail, &mut cache)?
+            };
             let mut cur = crate::models::pick(&logits, params.temperature, params.top_p)?;
             if params.max_tokens > 0 {
                 mlx_rs::transforms::async_eval([&cur])?;
@@ -356,6 +461,7 @@ fn run_generation(
             let decoded = out.len().saturating_sub(1).max(1) as f64;
             tracing::info!(
                 prompt_tokens,
+                cached_prefix = reused,
                 completion_tokens = out.len(),
                 prefill_ms = prefill.as_millis() as u64,
                 prefill_tps =

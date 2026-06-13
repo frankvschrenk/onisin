@@ -1086,6 +1086,18 @@ impl Model for Gemma4Model {
         p
     }
 
+    fn reusable_prefix_len(&self, rendered: &str) -> usize {
+        // The non-thinking generation prompt ends with an empty thought-channel
+        // prefill: it steers this turn but is never reproduced as history, so
+        // the prefix cache must freeze before it. The `<|turn>model\n` opener
+        // ahead of it does reappear as the next turn's assistant-turn head, so
+        // it stays inside the reusable prefix.
+        const THOUGHT_PREFILL: &str = "<|channel>thought\n<channel|>";
+        rendered
+            .strip_suffix(THOUGHT_PREFILL)
+            .map_or(rendered.len(), |head| head.len())
+    }
+
     fn stop_tokens(&self) -> &[i32] {
         &self.stop
     }

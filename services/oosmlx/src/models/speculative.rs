@@ -212,6 +212,10 @@ impl Model for SpecPair {
         self.target.render_prompt(messages, thinking, tools)
     }
 
+    fn reusable_prefix_len(&self, rendered: &str) -> usize {
+        self.target.reusable_prefix_len(rendered)
+    }
+
     fn stop_tokens(&self) -> &[i32] {
         self.target.stop_tokens()
     }
