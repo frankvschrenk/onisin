@@ -64,6 +64,13 @@ if [ ! -x "$BIN" ]; then
   cargo build -p oosmlx --release --features mlx >/dev/null || exit 1
 fi
 unset NATS_URL
+# Cold-prefill measurement: this harness warms with the *same* prompt it then
+# measures, and oosmlx grew a prompt-prefix cache (commit 1267d13) after this
+# script was written -- a live cache would serve the measured request's prefill
+# from the warmup and report a fictitious prefill_tps. mlx_lm re-prefills on
+# every call and the ollama leg warms on a different prompt, so both already
+# measure a cold prefill; this keeps the oosmlx leg comparable.
+export OOSMLX_PREFIX_CACHE=0
 LOG=/tmp/oosmlx_bench_server.log
 RUST_LOG=oosmlx=info "$BIN" 127.0.0.1:$PORT >"$LOG" 2>&1 &
 SRV=$!
