@@ -311,6 +311,11 @@ impl DeltaMixer {
         let q = fast::rms_norm(&q, qk_ones, 1e-6)?.multiply(&q2)?;
         let k = fast::rms_norm(&k, qk_ones, 1e-6)?.multiply(&k1)?;
 
+        // Hold on to the pre-repeat q/k ([seq, n_k, dk]) for the Metal-kernel
+        // path, which maps key heads to value heads on its own.
+        let q_pre = q.clone();
+        let k_pre = k.clone();
+
         // Repeat q/k from key heads to value heads, interleaved -- matches
         // mlx.repeat over the head axis (h0,h0,h1,h1,...).
         let rf = n_v / n_k;
@@ -325,34 +330,61 @@ impl DeltaMixer {
         let sp = nn::softplus(&a_raw.add(&self.dt_bias)?)?;
         let g = self.neg_exp_a_log.multiply(&sp)?.exp()?;
 
-        // The delta-rule recurrence runs in f32 (the state dominates). Ops
-        // reference port of gated_delta.py; a Metal kernel is a later perf
-        // step, correctness first.
-        let q = q.as_dtype(Dtype::Float32)?;
-        let k = k.as_dtype(Dtype::Float32)?;
-        let v = v.as_dtype(Dtype::Float32)?;
-        let mut state = match &prior {
+        // Initial recurrent state, shared by both paths.
+        let prior_state = match &prior {
             Some(ds) => ds.recurrent.clone(),
             None => ops::zeros_dtype(&[n_v, dv, dk], Dtype::Float32)?,
         };
-        let mut ys: Vec<Array> = Vec::with_capacity(seq as usize);
-        for t in 0..seq {
-            let qt = q.index(t);
-            let kt = k.index(t).reshape(&[n_v, 1, dk])?;
-            let vt = v.index(t);
-            let decay = g.index(t).reshape(&[n_v, 1, 1])?;
-            let bt = beta.index(t).reshape(&[n_v, 1])?;
 
-            state = state.multiply(&decay)?;
-            let kv_mem = state.multiply(&kt)?.sum_axes(&[-1], false)?;
-            let delta = vt.subtract(&kv_mem)?.multiply(&bt)?.reshape(&[n_v, dv, 1])?;
-            state = state.add(&kt.multiply(&delta)?)?;
-            let yt = state
-                .multiply(&qt.reshape(&[n_v, 1, dk])?)?
-                .sum_axes(&[-1], false)?;
-            ys.push(yt.as_dtype(COMPUTE)?);
-        }
-        let y = ops::stack_axis(&ys, 0)?;
+        // The recurrence is the perf bottleneck: a sequential T-step graph.
+        // OOSMLX_GATED_DELTA=kernel runs the single-launch Metal kernel; the
+        // default ops path stays the byte-identical reference (see 6af38a3).
+        let use_kernel = std::env::var("OOSMLX_GATED_DELTA").as_deref() == Ok("kernel");
+        let (y, state) = if use_kernel {
+            // q/k stay bf16 (pre-repeat); the kernel widens to f32 internally
+            // and maps key heads to value heads itself.
+            gated_delta_kernel(
+                &q_pre,
+                &k_pre,
+                &v,
+                &g,
+                &beta,
+                &prior_state,
+                seq,
+                n_k,
+                n_v,
+                dk,
+                dv,
+            )?
+        } else {
+            // The delta-rule recurrence runs in f32 (the state dominates), an
+            // ops reference port of gated_delta.py.
+            let q = q.as_dtype(Dtype::Float32)?;
+            let k = k.as_dtype(Dtype::Float32)?;
+            let v = v.as_dtype(Dtype::Float32)?;
+            let mut state = prior_state;
+            let mut ys: Vec<Array> = Vec::with_capacity(seq as usize);
+            for t in 0..seq {
+                let qt = q.index(t);
+                let kt = k.index(t).reshape(&[n_v, 1, dk])?;
+                let vt = v.index(t);
+                let decay = g.index(t).reshape(&[n_v, 1, 1])?;
+                let bt = beta.index(t).reshape(&[n_v, 1])?;
+
+                state = state.multiply(&decay)?;
+                let kv_mem = state.multiply(&kt)?.sum_axes(&[-1], false)?;
+                let delta = vt
+                    .subtract(&kv_mem)?
+                    .multiply(&bt)?
+                    .reshape(&[n_v, dv, 1])?;
+                state = state.add(&kt.multiply(&delta)?)?;
+                let yt = state
+                    .multiply(&qt.reshape(&[n_v, 1, dk])?)?
+                    .sum_axes(&[-1], false)?;
+                ys.push(yt.as_dtype(COMPUTE)?);
+            }
+            (ops::stack_axis(&ys, 0)?, state)
+        };
         cache.set_delta_state(
             layer_idx,
             DeltaState {
@@ -371,6 +403,147 @@ impl DeltaMixer {
             .reshape(&[seq, value_dim])?;
         self.out_proj.forward(&out)
     }
+}
+
+/// Metal source for the full GatedDeltaNet recurrence over all `T` steps,
+/// ported verbatim from mlx-lm `gated_delta.py` `_make_gated_delta_kernel`
+/// (scalar gating, no mask). The sequential recurrence collapses into one
+/// launch: a 32-thread simd-group cooperates over the `Dk` reduction via
+/// `simd_sum`, one `Dv` element per `grid.y`, one (batch, value-head) per
+/// `grid.z`, and per-thread `state` registers carry across the time loop.
+//
+// `T` is a 0-d int32 input (MLX binds scalar inputs by value, so it is usable
+// as a plain `T`); `Dk/Dv/Hk/Hv` and the `InT/StT` dtypes are template args.
+const GATED_DELTA_SOURCE: &str = r#"
+        auto n = thread_position_in_grid.z;
+        auto b_idx = n / Hv;
+        auto hv_idx = n % Hv;
+        auto hk_idx = hv_idx / (Hv / Hk);
+        constexpr int n_per_t = Dk / 32;
+
+        // q, k: [B, T, Hk, Dk]
+        auto q_ = q + b_idx * T * Hk * Dk + hk_idx * Dk;
+        auto k_ = k + b_idx * T * Hk * Dk + hk_idx * Dk;
+
+        // v, y: [B, T, Hv, Dv]
+        auto v_ = v + b_idx * T * Hv * Dv + hv_idx * Dv;
+        y += b_idx * T * Hv * Dv + hv_idx * Dv;
+
+        auto dk_idx = thread_position_in_threadgroup.x;
+        auto dv_idx = thread_position_in_grid.y;
+
+        // state_in, state_out: [B, Hv, Dv, Dk]
+        auto i_state = state_in + (n * Dv + dv_idx) * Dk;
+        auto o_state = state_out + (n * Dv + dv_idx) * Dk;
+
+        float state[n_per_t];
+        for (int i = 0; i < n_per_t; ++i) {
+          auto s_idx = n_per_t * dk_idx + i;
+          state[i] = static_cast<float>(i_state[s_idx]);
+        }
+
+        // g: [B, T, Hv]
+        auto g_ = g + b_idx * T * Hv;
+        auto beta_ = beta + b_idx * T * Hv;
+
+        for (int t = 0; t < T; ++t) {
+          float kv_mem = 0.0f;
+          for (int i = 0; i < n_per_t; ++i) {
+            auto s_idx = n_per_t * dk_idx + i;
+            state[i] = state[i] * g_[hv_idx];
+            kv_mem += state[i] * k_[s_idx];
+          }
+          kv_mem = simd_sum(kv_mem);
+
+          auto delta = (v_[dv_idx] - kv_mem) * beta_[hv_idx];
+
+          float out = 0.0f;
+          for (int i = 0; i < n_per_t; ++i) {
+            auto s_idx = n_per_t * dk_idx + i;
+            state[i] = state[i] + k_[s_idx] * delta;
+            out += state[i] * q_[s_idx];
+          }
+          out = simd_sum(out);
+          if (thread_index_in_simdgroup == 0) {
+            y[dv_idx] = static_cast<InT>(out);
+          }
+          q_ += Hk * Dk;
+          k_ += Hk * Dk;
+          v_ += Hv * Dv;
+          y += Hv * Dv;
+          g_ += Hv;
+          beta_ += Hv;
+        }
+        for (int i = 0; i < n_per_t; ++i) {
+          auto s_idx = n_per_t * dk_idx + i;
+          o_state[s_idx] = static_cast<StT>(state[i]);
+        }
+"#;
+
+/// Run the GatedDeltaNet recurrence as a single Metal-kernel launch instead of
+/// the sequential ops loop. `q`/`k` are pre-repeat `[seq, n_k, dk]` (the kernel
+/// maps key heads to value heads itself), `v` is `[seq, n_v, dv]`, all bf16;
+/// `g`/`beta` are `[seq, n_v]` f32; `state` is `[n_v, dv, dk]` f32. Returns the
+/// stacked per-step output `[seq, n_v, dv]` (bf16) and the carried-forward state.
+fn gated_delta_kernel(
+    q: &Array,
+    k: &Array,
+    v: &Array,
+    g: &Array,
+    beta: &Array,
+    state: &Array,
+    seq: i32,
+    n_k: i32,
+    n_v: i32,
+    dk: i32,
+    dv: i32,
+) -> Result<(Array, Array)> {
+    use fast::{MetalKernel, MetalKernelConfig, MetalKernelTemplateArg};
+
+    // Reshape to the kernel's batched layout; batch B = 1 here.
+    let q = q.reshape(&[1, seq, n_k, dk])?;
+    let k = k.reshape(&[1, seq, n_k, dk])?;
+    let v = v.reshape(&[1, seq, n_v, dv])?;
+    let g = g.reshape(&[1, seq, n_v])?;
+    let beta = beta.reshape(&[1, seq, n_v])?;
+    let state = state.reshape(&[1, n_v, dv, dk])?;
+    // Scalar (0-d) input; bound by value inside the kernel as `T`.
+    let t = Array::from_int(seq);
+
+    let kernel = MetalKernel::new(
+        "oosmlx_gated_delta_step",
+        &["q", "k", "v", "g", "beta", "state_in", "T"],
+        &["y", "state_out"],
+        GATED_DELTA_SOURCE,
+        "",
+        true,
+        false,
+    )?;
+
+    let y_shape: &[i32] = &[1, seq, n_v, dv];
+    let state_shape: &[i32] = &[1, n_v, dv, dk];
+    let config = MetalKernelConfig {
+        output_shapes: &[y_shape, state_shape],
+        output_dtypes: &[COMPUTE, Dtype::Float32],
+        grid: (32, dv, n_v),
+        thread_group: (32, 4, 1),
+        template_args: &[
+            ("InT", MetalKernelTemplateArg::Dtype(COMPUTE)),
+            ("StT", MetalKernelTemplateArg::Dtype(Dtype::Float32)),
+            ("Dk", MetalKernelTemplateArg::Int(dk)),
+            ("Dv", MetalKernelTemplateArg::Int(dv)),
+            ("Hk", MetalKernelTemplateArg::Int(n_k)),
+            ("Hv", MetalKernelTemplateArg::Int(n_v)),
+        ],
+        init_value: None,
+        verbose: false,
+    };
+
+    let inputs = [q, k, v, g, beta, state, t];
+    let outputs = kernel.apply(&inputs, &config)?;
+    let y = outputs[0].reshape(&[seq, n_v, dv])?;
+    let new_state = outputs[1].reshape(&[n_v, dv, dk])?;
+    Ok((y, new_state))
 }
 
 /// Either mixer kind for a decoder layer, selected by the layer index.
