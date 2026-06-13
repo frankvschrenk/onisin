@@ -276,8 +276,15 @@ impl QuantConfig {
     /// Resolve (group_size, bits) for a tensor prefix: an exact-match override
     /// if the checkpoint declared one, else the global default.
     fn spec_for(&self, prefix: &str) -> (i32, i32) {
+        // qwen3_5 strips the multimodal `language_model.` prefix off its weight
+        // names (to load 9B text and 35B VLM checkpoints uniformly), so its
+        // lookup prefixes are `model.*` while the override keys stay
+        // `language_model.model.*`; fall back to the prefixed key so the 8-bit
+        // router / shared_expert_gate overrides still resolve. Gemma keeps the
+        // full prefix and hits the exact match first, unaffected.
         self.overrides
             .get(prefix)
+            .or_else(|| self.overrides.get(&format!("language_model.{prefix}")))
             .copied()
             .unwrap_or((self.group_size, self.bits))
     }
