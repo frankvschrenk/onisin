@@ -14,6 +14,7 @@
 mod gemma3;
 mod gemma4;
 mod mistral;
+mod qwen3_5;
 mod toolfmt;
 // Not a `Model` family: the MTP drafter for speculative decoding. It is
 // consumed by the speculative round-loop, not by `load`'s dispatch.
@@ -136,9 +137,49 @@ pub struct ReasoningChannel {
 /// [`KvCache::snapshot`]: a later in-place slot write copy-on-writes the shared
 /// buffer rather than mutating the snapshot, because MLX never donates a buffer
 /// whose reference count is above one.
+/// Recurrent state of one GatedDeltaNet (linear-attention) layer -- the
+/// hybrid counterpart to a [`KvSlot`]. A delta layer keeps no growing K/V
+/// history: its entire past folds into two fixed-size tensors, so its memory
+/// is constant in context length instead of linear. Carried by
+/// [`KvCache::snapshot`] like the attention slots (shallow clone,
+/// copy-on-write on the next write).
+#[derive(Clone)]
+pub struct DeltaState {
+    /// The last `kernel - 1` inputs to the depthwise causal conv,
+    /// `[1, k-1, conv_dim]`, prepended to the next step's input so the
+    /// convolution stays causal across step boundaries.
+    pub conv: Array,
+    /// The delta-rule recurrent state `[num_v_heads, v_head_dim, k_head_dim]`,
+    /// advanced one token at a time and read out as the layer's output.
+    pub recurrent: Array,
+}
+
+/// Per-layer key/value cache for incremental decoding.
+///
+/// Each slot holds one layer's K/V post-RoPE in head-major `[1, nkv, cap, hd]`
+/// buffers, written in place per step instead of re-concatenating the whole
+/// history -- the concat cache copied O(n) per token per layer and dominated
+/// decode throughput at long contexts. Sliding-window layers additionally
+/// retain only the last `window` positions in a ring, capping their memory
+/// and making their single-token decode mask vacuous. Owned by the decode
+/// loop, so a `Model` stays stateless and shareable.
+///
+/// Hybrid families (GatedDeltaNet + gated attention) use `slots` for their
+/// attention layers and `delta` for their linear-attention layers; a layer
+/// indexes whichever applies by its own position. Pure-attention families
+/// leave `delta` all `None`.
+///
+/// Cloning is shallow (MLX arrays are reference-counted) and relied upon by
+/// [`KvCache::snapshot`]: a later in-place slot write copy-on-writes the shared
+/// buffer rather than mutating the snapshot, because MLX never donates a buffer
+/// whose reference count is above one.
 #[derive(Clone)]
 pub struct KvCache {
     slots: Vec<KvSlot>,
+    /// Recurrent state per layer for hybrid families; `None` at every
+    /// full-attention layer (which uses `slots`) and at every layer of a
+    /// pure-attention family. Sized by layer count, parallel to `slots`.
+    delta: Vec<Option<DeltaState>>,
     offset: usize,
     linear: bool,
 }
@@ -160,6 +201,7 @@ impl KvCache {
     fn build(num_layers: usize, linear: bool) -> Self {
         Self {
             slots: (0..num_layers).map(|_| KvSlot::new(linear)).collect(),
+            delta: (0..num_layers).map(|_| None).collect(),
             offset: 0,
             linear,
         }
@@ -205,6 +247,19 @@ impl KvCache {
     /// anything.
     pub fn layer_kv(&self, layer: usize) -> Result<Option<(Array, Array)>> {
         self.slots[layer].temporal()
+    }
+
+    /// The recurrent state of one hybrid layer, or `None` before its first
+    /// step. A delta layer reads this at the start of a step and writes the
+    /// advanced state back via [`KvCache::set_delta_state`]; the clone is
+    /// shallow, so a prefix-cache snapshot resumes the recurrence intact.
+    pub fn delta_state(&self, layer: usize) -> Option<DeltaState> {
+        self.delta[layer].clone()
+    }
+
+    /// Store one hybrid layer's advanced recurrent state after a step.
+    pub fn set_delta_state(&mut self, layer: usize, state: DeltaState) {
+        self.delta[layer] = Some(state);
     }
 
     /// Roll the cache back to the first `len` positions. Speculative decoding
@@ -678,7 +733,15 @@ pub fn load(files: &ModelFiles, tokenizer: &Tokenizer) -> Result<Box<dyn Model>>
         // "Mistral3ForConditionalGeneration" is a multimodal wrapper around
         // the ministral3 text tower; the family reads text_config itself.
         Ok(Box::new(mistral::MistralModel::load(files, tokenizer)?))
+    } else if lower.contains("qwen3_5") {
+        // "Qwen3_5ForConditionalGeneration" is a multimodal wrapper around the
+        // qwen3_5 text tower (hybrid GatedDeltaNet + gated attention); the
+        // family reads text_config and ignores the vision tower.
+        Ok(Box::new(qwen3_5::Qwen35Model::load(files, tokenizer)?))
     } else {
-        bail!("unsupported model architecture: {arch} (supported: gemma3, gemma4, ministral3)")
+        bail!(
+            "unsupported model architecture: {arch} \
+             (supported: gemma3, gemma4, ministral3, qwen3_5)"
+        )
     }
 }
