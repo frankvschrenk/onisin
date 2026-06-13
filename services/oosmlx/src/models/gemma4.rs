@@ -1117,7 +1117,7 @@ impl Model for Gemma4Model {
         // (the full tool token block is 46..=52).
         Some(crate::models::ToolCallMarkers {
             open: 48,
-            close: 49,
+            close: Some(49),
         })
     }
 

@@ -286,6 +286,9 @@ pub struct MistralModel {
     yarn_freqs: Array,
     yarn_mscale: f32,
     stop: Vec<i32>,
+    /// `[TOOL_CALLS]` token id when the tokenizer defines it; gates native
+    /// tool calling for this family. `None` runs the model without tools.
+    tool_calls_tok: Option<i32>,
 }
 
 impl MistralModel {
@@ -385,6 +388,10 @@ impl MistralModel {
             bail!("ministral3: no eos token id in generation_config.json or tokenizer");
         }
 
+        // `[TOOL_CALLS]` marks a call in this family's grammar (Mistral v13);
+        // resolve it from the tokenizer so the decode loop can capture calls.
+        let tool_calls_tok = tokenizer.token_to_id("[TOOL_CALLS]").map(|id| id as i32);
+
         Ok(Self {
             cfg,
             embed,
@@ -394,6 +401,7 @@ impl MistralModel {
             yarn_freqs,
             yarn_mscale,
             stop,
+            tool_calls_tok,
         })
     }
 
@@ -468,15 +476,17 @@ impl Model for MistralModel {
     }
 
     /// Mistral v13 chat format, from the checkpoint's chat_template.jinja:
-    /// BOS, an optional [SYSTEM_PROMPT] block, then [INST]-wrapped user turns
-    /// with raw assistant turns terminated by </s>. The generation prompt
-    /// simply ends after the last [/INST]. Tool declaration
-    /// ([AVAILABLE_TOOLS]) is a follow-up; the family has no thinking mode.
+    /// BOS, an optional [SYSTEM_PROMPT] block, the [AVAILABLE_TOOLS] block (the
+    /// OpenAI tools array verbatim) before the conversation, then
+    /// [INST]-wrapped user turns. Assistant turns render content then any tool
+    /// calls as `[TOOL_CALLS]name[ARGS]args`, then </s>; tool results return as
+    /// [TOOL_RESULTS]..[/TOOL_RESULTS]. The generation prompt simply ends after
+    /// the last block. The family has no thinking mode.
     fn render_prompt(
         &self,
         messages: &[ChatMessage],
         _thinking: bool,
-        _tools: &[oos_infer::openai::Tool],
+        tools: &[oos_infer::openai::Tool],
     ) -> String {
         let mut p = String::from("<s>");
         let mut rest = messages;
@@ -488,6 +498,16 @@ impl Model for MistralModel {
                 rest = &messages[1..];
             }
         }
+        // Tool declarations precede the conversation: the whole OpenAI tools
+        // array serialized as-is is the JSON shape the model was trained to
+        // read inside [AVAILABLE_TOOLS].
+        if !tools.is_empty() {
+            if let Ok(json) = serde_json::to_string(tools) {
+                p.push_str("[AVAILABLE_TOOLS]");
+                p.push_str(&json);
+                p.push_str("[/AVAILABLE_TOOLS]");
+            }
+        }
         for m in rest {
             match m.role.as_str() {
                 "user" => {
@@ -496,13 +516,50 @@ impl Model for MistralModel {
                     p.push_str("[/INST]");
                 }
                 "assistant" => {
+                    // Content, then each call as [TOOL_CALLS]name[ARGS]args,
+                    // then the turn-terminating eos -- the template's order.
                     p.push_str(&m.content);
+                    if let Some(calls) = &m.tool_calls {
+                        for call in calls {
+                            p.push_str("[TOOL_CALLS]");
+                            p.push_str(&call.function.name);
+                            p.push_str("[ARGS]");
+                            p.push_str(&call.function.arguments);
+                        }
+                    }
                     p.push_str("</s>");
+                }
+                "tool" => {
+                    p.push_str("[TOOL_RESULTS]");
+                    p.push_str(&m.content);
+                    p.push_str("[/TOOL_RESULTS]");
                 }
                 _ => {}
             }
         }
         p
+    }
+
+    fn tool_call_markers(&self) -> Option<crate::models::ToolCallMarkers> {
+        // [TOOL_CALLS] opens a call; there is no per-call close (close = None),
+        // so a call runs until the next [TOOL_CALLS] or the turn's eos.
+        self.tool_calls_tok.map(|open| crate::models::ToolCallMarkers {
+            open,
+            close: None,
+        })
+    }
+
+    fn parse_tool_call(&self, span: &str) -> Result<(String, String)> {
+        // The captured span (special tokens kept) is `name[ARGS]{json}`; the
+        // arguments are already JSON, validated here so a malformed call fails
+        // loudly rather than reaching the agent.
+        let (name, args) = span
+            .split_once("[ARGS]")
+            .ok_or_else(|| anyhow!("mistral tool call has no [ARGS] separator: {span:?}"))?;
+        let args = args.trim();
+        serde_json::from_str::<serde_json::Value>(args)
+            .map_err(|e| anyhow!("mistral tool call arguments are not valid JSON: {e}"))?;
+        Ok((name.trim().to_string(), args.to_string()))
     }
 
     fn stop_tokens(&self) -> &[i32] {

@@ -417,7 +417,7 @@ fn run_generation(
                             break 'route;
                         }
                         if in_tool_call {
-                            if next == t.close {
+                            if t.close == Some(next) {
                                 in_tool_call = false;
                             } else if let Some(span) = tool_spans.last_mut() {
                                 span.push(next as u32);
@@ -490,11 +490,15 @@ fn run_generation(
         stream_delta(tokenizer, &content_view, emitted_content, None, false, emit)?;
     }
 
-    // Parse the captured call spans into structured calls. A span left open
-    // by an exhausted token budget is dropped (finish then reports "length");
-    // a completed span that fails to parse is a model-side glitch surfaced
-    // as an error, since silently dropping a call would derail an agent loop.
-    let complete_spans = if in_tool_call {
+    // Parse the captured call spans into structured calls. For a family with
+    // an explicit close token, a span still open at the end was truncated by
+    // the token budget and is dropped (finish then reports "length"). For a
+    // family whose calls run to the turn's end (close = None, mistral), the
+    // final open span is that last complete call and is kept. A completed span
+    // that fails to parse is a model-side glitch surfaced as an error, since
+    // silently dropping a call would derail an agent loop.
+    let drop_truncated = in_tool_call && toolmark.and_then(|t| t.close).is_some();
+    let complete_spans = if drop_truncated {
         &tool_spans[..tool_spans.len() - 1]
     } else {
         &tool_spans[..]
@@ -516,7 +520,9 @@ fn run_generation(
     // Tool blocks travel as structured calls, not as text: strip them from
     // the raw stream before the content/reasoning split.
     let text_toks = match toolmark {
-        Some(t) if !tool_spans.is_empty() => strip_tool_spans(&out, t.open as u32, t.close as u32),
+        Some(t) if !tool_spans.is_empty() => {
+            strip_tool_spans(&out, t.open as u32, t.close.map(|c| c as u32))
+        }
         _ => out.clone(),
     };
 
@@ -575,14 +581,16 @@ fn run_generation(
 /// completion; the calls travel separately as structured ToolCalls, so
 /// nothing of them belongs in the decoded text.
 #[cfg(feature = "mlx")]
-fn strip_tool_spans(out: &[u32], open: u32, close: u32) -> Vec<u32> {
+fn strip_tool_spans(out: &[u32], open: u32, close: Option<u32>) -> Vec<u32> {
     let mut kept = Vec::with_capacity(out.len());
     let mut inside = false;
     for &tok in out {
         if tok == open {
             inside = true;
         } else if inside {
-            if tok == close {
+            // With a close token each block ends at it; without one (mistral),
+            // the calls run to the turn's end, so once inside we stay inside.
+            if close == Some(tok) {
                 inside = false;
             }
         } else {

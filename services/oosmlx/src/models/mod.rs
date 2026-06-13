@@ -106,7 +106,11 @@ pub trait Model: Send {
 #[derive(Debug, Clone, Copy)]
 pub struct ToolCallMarkers {
     pub open: i32,
-    pub close: i32,
+    /// Closes a single call for families that pair each one (gemma4's
+    /// `<tool_call|>`). `None` for families whose calls have no close token and
+    /// run until the next call or the turn's end (mistral): the engine then
+    /// keeps the final open span instead of treating it as truncated.
+    pub close: Option<i32>,
 }
 
 /// Marker ids and name of a model family's reasoning channel; see
