@@ -74,6 +74,10 @@ fn default_sparse_step() -> usize {
 #[derive(Debug, Clone, Deserialize)]
 struct Qwen35Config {
     hidden_size: usize,
+    // Dense FFN width. MoE checkpoints (35B-A3B) carry only moe_/shared_expert_
+    // intermediate sizes and omit this, so default it; the dense MLP path that
+    // reads it is never taken when every layer is MoE.
+    #[serde(default)]
     intermediate_size: usize,
     num_hidden_layers: usize,
     num_attention_heads: usize,
