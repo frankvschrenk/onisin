@@ -336,10 +336,11 @@ impl DeltaMixer {
             None => ops::zeros_dtype(&[n_v, dv, dk], Dtype::Float32)?,
         };
 
-        // The recurrence is the perf bottleneck: a sequential T-step graph.
-        // OOSMLX_GATED_DELTA=kernel runs the single-launch Metal kernel; the
-        // default ops path stays the byte-identical reference (see 6af38a3).
-        let use_kernel = std::env::var("OOSMLX_GATED_DELTA").as_deref() == Ok("kernel");
+        // The recurrence is the perf bottleneck: a sequential T-step graph, so
+        // the single-launch Metal kernel is the default (~2.4x faster prefill
+        // at 2.7k ctx). OOSMLX_GATED_DELTA=ops forces the byte-identical
+        // reference recurrence (see 6af38a3 / qwen35_parity.py) for parity.
+        let use_kernel = std::env::var("OOSMLX_GATED_DELTA").as_deref() != Ok("ops");
         let (y, state) = if use_kernel {
             // q/k stay bf16 (pre-repeat); the kernel widens to f32 internally
             // and maps key heads to value heads itself.
