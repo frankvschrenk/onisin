@@ -62,6 +62,7 @@ const SUBJECTS: &[&str] = &[
     "oos.cmd.event_type_grammar.delete",
     "oos.cmd.event_mappings.list",
     "oos.cmd.event_mappings.set_types",
+    "oos.cmd.event_streams.list",
     "oos.cmd.event.refresh",
     // RAG index subjects for the oos agent's system prompt (read-only).
     "oos.cmd.global",
@@ -295,6 +296,42 @@ async fn handle(
                 .execute(pool)
                 .await?;
             json!({ "ok": true })
+        }
+
+        // ── Event streams ────────────────────────
+        // The oos Ask panel's StreamPicker lists streams for the
+        // active mapping; `mapping` is the mapping *name* (empty = all).
+        // mapping_name is joined back so the manager panel can show it
+        // without a second round-trip.
+        "oos.cmd.event_streams.list" => {
+            let mapping = body.get("mapping").and_then(Value::as_str).unwrap_or("");
+            let limit = body.get("limit").and_then(Value::as_i64).unwrap_or(100);
+            let rows = sqlx::query(
+                "SELECT s.stream, s.description, s.event_mapping_id::int8 AS event_mapping_id,
+                        m.name AS mapping_name, s.tag
+                 FROM public.event_streams s
+                 LEFT JOIN public.event_mappings m ON m.id = s.event_mapping_id
+                 WHERE $1 = '' OR m.name = $1
+                 ORDER BY s.stream
+                 LIMIT $2",
+            )
+            .bind(mapping)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?;
+            let mut streams = Vec::with_capacity(rows.len());
+            for r in &rows {
+                let mapping_name = r.try_get::<Option<String>, _>("mapping_name")?;
+                streams.push(json!({
+                    "stream":           r.try_get::<String, _>("stream")?,
+                    "description":      r.try_get::<String, _>("description")?,
+                    "event_mapping_id": r.try_get::<Option<i64>, _>("event_mapping_id")?,
+                    "mapping_name":     mapping_name.clone(),
+                    "mapping":          mapping_name,
+                    "tag":              r.try_get::<Option<String>, _>("tag")?,
+                }));
+            }
+            json!({ "streams": streams })
         }
 
         // ── RAG index (oos agent system prompt) ───────────────────

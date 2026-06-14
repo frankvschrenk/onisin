@@ -406,7 +406,12 @@ export const rpc = {
 	// (d) event subsystem \u2014 blocked on the oosai event endpoints (same block
 	// as oosd's police/support seeds). Stubs keep the panels compiling.
 	listAllStreams:    (_?: unknown)       => asJsonStub(),
-	getEventStreams:   (_p: { mapping: string; limit?: number })                 => asJsonStub(),
+	async getEventStreams(p: { mapping: string; limit?: number }): Promise<{ json: string; error?: string }> {
+		try {
+			const res = await natsRequest<{ streams?: unknown[] }>("oos.cmd.event_streams.list", { mapping: p.mapping, limit: p.limit ?? 100 });
+			return { json: JSON.stringify({ streams: res.streams ?? [] }) };
+		} catch (err) { return { json: "", error: String(err) }; }
+	},
 	getEventSchemas:   (_p: { mapping: string; stream?: string })                => asJsonStub(),
 	getEventTags:      (_p: { mapping: string })                                 => asJsonStub(),
 	getStreamTag:      (_p: { stream: string })                                  => Promise.resolve({ tag: null as string | null, error: NOT_MIGRATED }),
