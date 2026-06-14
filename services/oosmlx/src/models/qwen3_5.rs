@@ -742,6 +742,11 @@ pub struct Qwen35Model {
     /// Ones over the key head dim: the weightless QK-norm of the delta path.
     delta_qk_ones: Array,
     stop: Vec<i32>,
+    /// `<tool_call>` / `</tool_call>` ids, resolved from the tokenizer at load.
+    /// `None` on a checkpoint whose tokenizer lacks them (e.g. a base 9B): the
+    /// family then advertises no tool grammar and tool calls fall back to text.
+    tool_open: Option<i32>,
+    tool_close: Option<i32>,
 }
 
 impl Qwen35Model {
@@ -899,6 +904,13 @@ impl Qwen35Model {
             anyhow::bail!("qwen3_5: no eos token id in config or tokenizer");
         }
 
+        // Qwen delimits a tool-call block with the single special tokens
+        // <tool_call> / </tool_call>; the inner <function=>/<parameter=>
+        // grammar is plain text. Resolved here so the engine can capture the
+        // span -- absent means no tool grammar advertised.
+        let tool_open = tokenizer.token_to_id("<tool_call>").map(|id| id as i32);
+        let tool_close = tokenizer.token_to_id("</tool_call>").map(|id| id as i32);
+
         Ok(Self {
             cfg,
             embed,
@@ -907,6 +919,8 @@ impl Qwen35Model {
             layers,
             delta_qk_ones,
             stop,
+            tool_open,
+            tool_close,
         })
     }
 
@@ -955,30 +969,106 @@ impl Model for Qwen35Model {
         Ok(self.lm_head.forward(&last)?.index(0))
     }
 
-    /// Qwen ChatML: `<|im_start|>{role}\n{content}<|im_end|>\n` per turn, then
-    /// an open assistant turn. Non-thinking is the bring-up default: an empty
-    /// `<think>\n\n</think>\n\n` block is prefilled so the model answers
-    /// directly; with `thinking` the block is left open for the model to fill.
+    /// Qwen ChatML with native tool calling, from the checkpoint's
+    /// chat_template.jinja. Per turn `<|im_start|>{role}\n{content}<|im_end|>\n`,
+    /// then an open assistant turn. Non-thinking is the bring-up default: an
+    /// empty `<think>\n\n</think>\n\n` block is prefilled so the model answers
+    /// directly; with `thinking` the block is left open.
+    ///
+    /// Tools and the system message share one leading system turn (the template
+    /// renders the system message there and skips it in the main loop): tool
+    /// specs go inside `<tools>` as JSON one per line, followed by the literal
+    /// instruction that teaches the `<function=...>`/`<parameter=...>` XML call
+    /// grammar. Assistant calls re-render in that grammar; tool results group
+    /// into a `<tool_response>` user turn.
     fn render_prompt(
         &self,
         messages: &[ChatMessage],
         thinking: bool,
-        _tools: &[oos_infer::openai::Tool],
+        tools: &[oos_infer::openai::Tool],
     ) -> String {
         let mut p = String::new();
-        for m in messages {
+        let system = messages
+            .first()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.trim());
+
+        // Leading system turn carries tools (if any) and the system message;
+        // the main loop below skips the system message because it lives here.
+        if !tools.is_empty() {
+            p.push_str("<|im_start|>system\n# Tools\n\nYou have access to the following functions:\n\n<tools>");
+            for tool in tools {
+                p.push('\n');
+                if let Ok(json) = serde_json::to_string(tool) {
+                    p.push_str(&json);
+                }
+            }
+            p.push_str("\n</tools>");
+            p.push_str(TOOL_FORMAT_INSTRUCTION);
+            if let Some(sys) = system.filter(|s| !s.is_empty()) {
+                p.push_str("\n\n");
+                p.push_str(sys);
+            }
+            p.push_str("<|im_end|>\n");
+        } else if let Some(sys) = system {
+            p.push_str("<|im_start|>system\n");
+            p.push_str(sys);
+            p.push_str("<|im_end|>\n");
+        }
+
+        for (i, m) in messages.iter().enumerate() {
             match m.role.as_str() {
-                "system" | "user" | "assistant" => {
-                    p.push_str("<|im_start|>");
-                    p.push_str(&m.role);
-                    p.push('\n');
-                    p.push_str(&m.content);
+                "user" => {
+                    p.push_str("<|im_start|>user\n");
+                    p.push_str(m.content.trim());
                     p.push_str("<|im_end|>\n");
                 }
-                // Tool turns are deferred to a later increment.
+                "assistant" => {
+                    p.push_str("<|im_start|>assistant\n");
+                    // History must not re-expose the model's own reasoning.
+                    let content = strip_think(&m.content);
+                    p.push_str(&content);
+                    if let Some(calls) = &m.tool_calls {
+                        for (j, call) in calls.iter().enumerate() {
+                            // First call: a blank line only after real content;
+                            // further calls are newline-separated.
+                            if j == 0 {
+                                if !content.is_empty() {
+                                    p.push_str("\n\n");
+                                }
+                            } else {
+                                p.push('\n');
+                            }
+                            p.push_str("<tool_call>\n<function=");
+                            p.push_str(&call.function.name);
+                            p.push_str(">\n");
+                            render_call_params(&mut p, &call.function.arguments);
+                            p.push_str("</function>\n</tool_call>");
+                        }
+                    }
+                    p.push_str("<|im_end|>\n");
+                }
+                "tool" => {
+                    // Consecutive tool results share one user turn, each wrapped
+                    // in <tool_response>; the turn opens on the first result and
+                    // closes after the last.
+                    let prev_tool = i > 0 && messages[i - 1].role == "tool";
+                    let next_tool = i + 1 < messages.len() && messages[i + 1].role == "tool";
+                    if !prev_tool {
+                        p.push_str("<|im_start|>user");
+                    }
+                    p.push_str("\n<tool_response>\n");
+                    p.push_str(m.content.trim());
+                    p.push_str("\n</tool_response>");
+                    if !next_tool {
+                        p.push_str("<|im_end|>\n");
+                    }
+                }
+                // system already rendered above; anything else dropped.
                 _ => {}
             }
         }
+
         p.push_str("<|im_start|>assistant\n");
         if thinking {
             p.push_str("<think>\n");
@@ -988,7 +1078,106 @@ impl Model for Qwen35Model {
         p
     }
 
+    fn tool_call_markers(&self) -> Option<crate::models::ToolCallMarkers> {
+        // <tool_call>/</tool_call> are paired special tokens (close = Some),
+        // resolved at load; the inner <function=>/<parameter=> grammar is plain
+        // text handled in parse_tool_call.
+        match (self.tool_open, self.tool_close) {
+            (Some(open), Some(close)) => Some(crate::models::ToolCallMarkers {
+                open,
+                close: Some(close),
+            }),
+            _ => None,
+        }
+    }
+
+    fn parse_tool_call(&self, span: &str) -> Result<(String, String)> {
+        parse_qwen_tool_call(span)
+    }
+
     fn stop_tokens(&self) -> &[i32] {
         &self.stop
     }
+}
+
+/// The instruction block that follows the `<tools>` declaration, verbatim from
+/// the checkpoint's chat_template.jinja. It teaches the model the
+/// `<function=name>`/`<parameter=key>` XML call grammar that
+/// [`parse_qwen_tool_call`] reads back.
+const TOOL_FORMAT_INSTRUCTION: &str = "\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>";
+
+/// Drop a prior assistant turn's `<think>...</think>` reasoning, keeping only
+/// what follows the last `</think>`. Mirrors the template, which never feeds
+/// the model its own past reasoning back as history; turns without a think
+/// block pass through trimmed.
+fn strip_think(content: &str) -> String {
+    match content.rsplit_once("</think>") {
+        Some((_, after)) => after.trim().to_string(),
+        None => content.trim().to_string(),
+    }
+}
+
+/// Render an OpenAI tool-call arguments object (a JSON string) into Qwen's
+/// `<parameter=key>\nvalue\n</parameter>` lines. String values are emitted raw,
+/// everything else as compact JSON -- the inverse of the template's
+/// `args_value | string if string else args_value | tojson`. A non-object or
+/// unparsable arguments string yields no parameters rather than failing the
+/// whole prompt.
+fn render_call_params(p: &mut String, arguments: &str) {
+    if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(arguments)
+    {
+        for (key, value) in &map {
+            p.push_str("<parameter=");
+            p.push_str(key);
+            p.push_str(">\n");
+            match value {
+                serde_json::Value::String(s) => p.push_str(s),
+                other => p.push_str(&other.to_string()),
+            }
+            p.push_str("\n</parameter>\n");
+        }
+    }
+}
+
+/// Parse one `<tool_call>...</tool_call>` span (markers excluded) into
+/// `(function name, JSON-encoded arguments object)`. The body is Qwen's XML
+/// call grammar `<function=NAME>\n<parameter=KEY>\nVALUE\n</parameter>...`. Each
+/// value is JSON-parsed when it can be (numbers, objects, arrays, quoted
+/// strings) and otherwise kept as a string, inverting [`render_call_params`]
+/// so a render/parse round-trip is stable.
+fn parse_qwen_tool_call(span: &str) -> Result<(String, String)> {
+    let fn_open = span
+        .find("<function=")
+        .ok_or_else(|| anyhow::anyhow!("qwen tool call has no <function=...> block: {span:?}"))?;
+    let after = &span[fn_open + "<function=".len()..];
+    let name_end = after
+        .find('>')
+        .ok_or_else(|| anyhow::anyhow!("qwen tool call <function= is not closed: {span:?}"))?;
+    let name = after[..name_end].trim().to_string();
+
+    let mut args = serde_json::Map::new();
+    let mut rest = &after[name_end + 1..];
+    while let Some(pos) = rest.find("<parameter=") {
+        let key_part = &rest[pos + "<parameter=".len()..];
+        let key_end = match key_part.find('>') {
+            Some(e) => e,
+            None => break,
+        };
+        let key = key_part[..key_end].trim().to_string();
+        let val_part = &key_part[key_end + 1..];
+        let val_end = match val_part.find("</parameter>") {
+            Some(e) => e,
+            None => break,
+        };
+        // The template wraps the value in newlines: <parameter=k>\nVALUE\n</parameter>.
+        let raw = val_part[..val_end].trim_matches('\n');
+        let value = serde_json::from_str::<serde_json::Value>(raw)
+            .unwrap_or_else(|_| serde_json::Value::String(raw.to_string()));
+        args.insert(key, value);
+        rest = &val_part[val_end + "</parameter>".len()..];
+    }
+
+    let json = serde_json::to_string(&serde_json::Value::Object(args))
+        .map_err(|e| anyhow::anyhow!("qwen tool call args not serializable: {e}"))?;
+    Ok((name, json))
 }
