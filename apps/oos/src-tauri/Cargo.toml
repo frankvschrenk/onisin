@@ -2,7 +2,7 @@
 # root /Users/frank/repro/onisin Rust workspace (services/ + crates/). The
 # empty [workspace] table detaches it so the Tauri binary keeps its own
 # Cargo.lock and target/, exactly like apps/oosd and the crypto reference
-# app \u2014 a `cargo` run here does not drag in the headless services.
+# app — a `cargo` run here does not drag in the headless services.
 [workspace]
 
 [package]
@@ -50,11 +50,18 @@ data-encoding = "2"
 # PKCE: code_challenge = base64url(sha256(code_verifier)).
 sha2 = "0.10"
 
+# RIG — agentic LLM framework for the Dev tab.
+# rig-core pulls in tokio + async-trait; we share tokio with Tauri.
+rig-core = "0.39"
+
+# NATS client for bench tool calls (bench subjects: bench.fs.*, bench.exec.*, …)
+# The same tokio runtime Tauri uses drives this.
+async-nats = "0.38"
+
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+
 # Token storage in the OS keychain via one cross-platform crate: macOS
-# Keychain, Windows Credential Manager, Linux secret-service. keyring v3
-# is the stable single-crate API (Entry::new + set/get/delete); v4 split
-# into keyring-core + per-OS store crates and is still stabilising, so we
-# stay on v3. Platform store selected per target.
+# Keychain, Windows Credential Manager, Linux secret-service.
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
 

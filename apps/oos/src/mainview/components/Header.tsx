@@ -25,6 +25,7 @@ import { ActionIcon, Group, Menu, Text } from "@mantine/core";
 import {
 	IconActivity,
 	IconBook,
+	IconCode,
 	IconHistory,
 	IconHome,
 	IconLogout,
@@ -41,6 +42,7 @@ import { spotlight } from "@mantine/spotlight";
 import {
 	openActivityList,
 	openChatHistory,
+	openDev,
 	openDocs,
 	openNewEvent,
 	openPipelineList,
@@ -127,6 +129,12 @@ export function Header({ onLogout }: { onLogout: () => void }) {
 						onClick={openNewEvent}
 					>
 						New Event
+					</Menu.Item>
+					<Menu.Item
+						leftSection={<IconCode size={16} />}
+						onClick={openDev}
+					>
+						Dev
 					</Menu.Item>
 					<Menu.Item
 						leftSection={<IconLanguage size={16} />}

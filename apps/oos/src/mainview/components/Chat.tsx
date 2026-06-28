@@ -125,7 +125,8 @@ export function Chat({ messages, busy = false, onSend, onCancel, onClear }: Chat
 	// search would dump the whole mapping into the LLM context.
 	const eventsMode    = uiState.mode === "events";
 	const documentsMode = uiState.mode === "documents";
-	const askMode       = uiState.mode === "ask";
+	// Dev mode shares ask-mode behaviour: no domain resolver, no view pill.
+	const askMode       = uiState.mode === "ask" || uiState.mode === "dev";
 	const hasMapping    = !!uiState.mapping;
 	const hasStream     = !!uiState.streamId;
 	// Events mode requires both mapping and stream before sending.

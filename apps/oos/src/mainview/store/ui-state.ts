@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { rpc } from "../rpc";
 
-export type ChatMode = "ask" | "forms" | "events" | "documents";
+export type ChatMode = "ask" | "forms" | "events" | "documents" | "dev";
 
 export interface UiState {
 	mode:     ChatMode;
@@ -75,7 +75,7 @@ function parseUiState(raw: unknown): UiState {
 	if (!raw || typeof raw !== "object") return { ...DEFAULT_UI_STATE };
 	const r = raw as Record<string, unknown>;
 	return {
-		mode:     r.mode === "ask" ? "ask" : r.mode === "events" ? "events" : r.mode === "documents" ? "documents" : "forms",
+		mode:     r.mode === "ask" ? "ask" : r.mode === "events" ? "events" : r.mode === "documents" ? "documents" : r.mode === "dev" ? "dev" : "forms",
 		mapping:  typeof r.mapping  === "string" && r.mapping  ? r.mapping  : null,
 		streamId: typeof r.streamId === "string" && r.streamId ? r.streamId : null,
 		askToTab: r.askToTab === true,

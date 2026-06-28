@@ -40,12 +40,15 @@
 // handled directly by the composer's drop handler — it doesn't
 // need a round-trip through here.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "@mantine/core";
 import { useHotkeys } from "@mantine/hooks";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 
 import { subscribe as subscribeChatEvent } from "./chat-events";
+import { invoke }                           from "@tauri-apps/api/core";
+import { listen }                           from "@tauri-apps/api/event";
+import { useUiState }                        from "./store/ui-state";
 import { clearClaims }        from "./store/auth";
 import { Chat }                from "./components/Chat";
 import { Footer }              from "./components/Footer";
@@ -91,9 +94,96 @@ export function App() {
 	);
 }
 
+// ── Dev-mode chat hook ───────────────────────────────────────────────
+//
+// Reuses the existing ChatMessage type and Chat component so the Dev
+// agent gets identical bubbles, Markdown rendering, and scrollback.
+// Tauri events (dev_event) are translated into assistant messages so
+// Chat.tsx never needs to know about the agent loop underneath.
+// Monotonic counter for stable message ids within the dev chat.
+let devMsgSeq = 0;
+function devId() { return `dev-${++devMsgSeq}`; }
+function devTs() { return new Date().toISOString(); }
+
+function useDevChat(settings: import("./store/settings").AppSettings) {
+	const [messages, setMessages] = useState<import("./types").ChatMessage[]>([]);
+	const [busy, setBusy]         = useState(false);
+	const unlistenRef             = useRef<(() => void) | null>(null);
+
+	useEffect(() => {
+		let active = true;
+		void listen<{
+			kind: string;
+			text?: string; answer?: string; message?: string;
+			name?: string; args?: string; result?: string;
+		}>("dev_event", (ev) => {
+			if (!active) return;
+			const p = ev.payload;
+
+			// Append to the last assistant bubble or create a new one.
+			const append = (chunk: string) =>
+				setMessages((prev) => {
+					const last = prev[prev.length - 1];
+					if (last?.role === "assistant") {
+						return [...prev.slice(0, -1), { ...last, text: last.text + chunk }];
+					}
+					return [...prev, { id: devId(), role: "assistant" as const, text: chunk, ts: devTs() }];
+				});
+
+			switch (p.kind) {
+				case "token":       append(p.text ?? ""); break;
+				case "tool_call":   append(`\`${p.name}\`(${p.args ?? ""})\n`); break;
+				case "tool_result": append(`→ ${p.result ?? ""}\n`); break;
+				case "done":
+					// Replace the streaming accumulation bubble with the final answer.
+					setMessages((prev) => {
+						const rest = prev[prev.length - 1]?.role === "assistant" ? prev.slice(0, -1) : prev;
+						return [...rest, { id: devId(), role: "assistant" as const, text: p.answer ?? "", ts: devTs() }];
+					});
+					setBusy(false);
+					break;
+				case "error":
+					append(`⚠ ${p.message ?? "Unknown error"}`);
+					setBusy(false);
+					break;
+			}
+		}).then((fn) => { unlistenRef.current = fn; });
+		return () => { active = false; unlistenRef.current?.(); };
+	}, []);
+
+	const send = useCallback(async (text: string) => {
+		if (!text.trim() || busy) return;
+		setMessages((prev) => [...prev, { id: devId(), role: "user" as const, text, ts: devTs() }]);
+		setBusy(true);
+		try {
+			await invoke("dev_run", { args: {
+				prompt:   text,
+				base_url: settings.llmBaseUrl,
+				api_key:  settings.llmApiKey ?? "",
+				model:    settings.llmModel,
+				nats_url: settings.natsUrl,
+			}});
+		} catch (err) {
+			setMessages((prev) => [...prev, {
+				id:   devId(),
+				role: "assistant" as const,
+				text: `⚠ ${err instanceof Error ? err.message : String(err)}`,
+				ts:   devTs(),
+			}]);
+			setBusy(false);
+		}
+	}, [busy, settings]);
+
+	const clear = useCallback(() => setMessages([]), []);
+
+	return { messages, busy, send, clear };
+}
+
 function MainApp({ onLogout }: { onLogout: () => void }) {
 	const { groups, activeId } = useTabs();
 	const { settings }         = useAppSettings();
+	const { state: uiState }   = useUiState();
+	const mode                 = uiState.mode;
 	const {
 		messages,
 		busy,
@@ -103,6 +193,16 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
 		newChat,
 		loadChatById,
 	} = useChat(settings);
+	const dev = useDevChat(settings);
+
+	const isDevMode = mode === "dev";
+	const activeMessages = isDevMode ? dev.messages : messages;
+	const activeBusy     = isDevMode ? dev.busy     : busy;
+	const activeSend     = isDevMode
+		? (text: string, _viewName: string | null) => dev.send(text)
+		: send;
+	const activeClear    = isDevMode ? dev.clear     : newChat;
+	const activeCancel   = isDevMode ? () => {}      : cancel;
 
 	useHotkeys([
 		["mod+,", () => openSettings()],
@@ -168,7 +268,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
 						maxSize="60%"
 						style={{ overflow: "hidden" }}
 					>
-						<Chat messages={messages} busy={busy} onSend={send} onCancel={cancel} onClear={newChat} />
+						<Chat messages={activeMessages} busy={activeBusy} onSend={activeSend} onCancel={activeCancel} onClear={activeClear} />
 					</Panel>
 
 					<Separator

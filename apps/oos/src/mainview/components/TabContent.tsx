@@ -31,6 +31,7 @@ import { SettingsFinetuningPanel }   from "./SettingsFinetuningPanel";
 import { LogsContent }               from "./LogsContent";
 import { SettingsPermissionsPanel }  from "./SettingsPermissionsPanel";
 import { ViewRenderer }              from "./ViewRenderer";
+import { DevPanel }                  from "./DevPanel";
 import { WelcomePanel }              from "./WelcomePanel";
 
 interface TabContentProps {
@@ -119,6 +120,8 @@ export function TabContent({ tab }: TabContentProps) {
 					streamId={tab.payload.streamId}
 				/>
 			);
+		case "dev":
+			return <DevPanel />;
 		case "pipeline_list":
 			return <PipelineListPanel />;
 		case "pipeline_run":

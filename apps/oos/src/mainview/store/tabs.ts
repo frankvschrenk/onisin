@@ -56,10 +56,11 @@ export type TabKind =
 	| "translate"            // side-by-side Markdown translator (two MDXEditor panes)
 	| "stream_detail"        // event entry form for one stream
 	| "pipeline_list"        // browse and launch saved pipelines
-	| "pipeline_run";        // running or completed pipeline result
+	| "pipeline_run"         // running or completed pipeline result
+	| "dev";                 // Dev agent tab — agentic loop with bench/oosmem tools
 
 /** Discriminator for the group the tab lives in. */
-export type GroupKind = "welcome" | "docs" | "results" | "settings" | "history" | "activity";
+export type GroupKind = "welcome" | "docs" | "results" | "settings" | "history" | "activity" | "dev";
 
 /** Per-tab payload. Discriminated by `kind` to keep dispatch simple. */
 export type TabPayload =
@@ -178,7 +179,8 @@ export type TabPayload =
 			sourceTable: string;
 			/** Stream id — e.g. "fall-2024-0042". */
 			streamId:    string;
-	  };
+	  }
+	| { kind: "dev" };
 
 /** A single tab in the IDE-style vertical tab rail. */
 export interface TabRecord {
@@ -1028,6 +1030,43 @@ export function updatePipelineRunTab(
 		}),
 	}));
 	setState({ ...state, groups });
+}
+
+/**
+ * openDev opens (or focuses) the Dev agent tab.
+ *
+ * Lives in its own group — parallel workspace, never displaced by
+ * chat results or docs. A single tab is enough; the agent loop
+ * output is displayed inside DevPanel.
+ */
+export function openDev(): void {
+	const targetTabId = "dev:agent";
+	for (const g of state.groups) {
+		for (const t of g.tabs) {
+			if (t.id === targetTabId) {
+				setState({ ...state, activeId: targetTabId });
+				return;
+			}
+		}
+	}
+	const group: TabGroup = {
+		id:    "dev",
+		kind:  "dev",
+		title: "Dev",
+		tabs: [
+			{
+				id:       targetTabId,
+				groupId:  "dev",
+				title:    "Dev",
+				subtitle: "Agent",
+				payload:  { kind: "dev" },
+			},
+		],
+		displaceOnNewActivity: false,
+		displaceOnDocsOpen:    false,
+	};
+	const groups = [...state.groups.filter((g) => g.kind !== "welcome"), group];
+	setState({ groups, activeId: targetTabId });
 }
 
 /**

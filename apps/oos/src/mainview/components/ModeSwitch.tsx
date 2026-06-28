@@ -29,6 +29,7 @@ import {
 	IconForms,
 	IconCalendarEvent,
 	IconFileText,
+	IconCode,
 } from "@tabler/icons-react";
 
 import { useUiState, type ChatMode } from "../store/ui-state";
@@ -62,6 +63,7 @@ export function ModeSwitch() {
 		// Switching to documents opens the pipeline browser automatically.
 		void save({ ...state, mode: next });
 		if (next === "documents") openPipelineList();
+		// dev mode needs no tab side-effect — the chat column handles it.
 	};
 
 	return (
@@ -78,6 +80,7 @@ export function ModeSwitch() {
 				<Tabs.Tab value="forms"     leftSection={<IconForms size={16} />}>Forms</Tabs.Tab>
 				<Tabs.Tab value="events"    leftSection={<IconCalendarEvent size={16} />}>Events</Tabs.Tab>
 				<Tabs.Tab value="documents" leftSection={<IconFileText size={16} />}>Documents</Tabs.Tab>
+				<Tabs.Tab value="dev"       leftSection={<IconCode size={16} />}>Dev</Tabs.Tab>
 			</Tabs.List>
 		</Tabs>
 	);
